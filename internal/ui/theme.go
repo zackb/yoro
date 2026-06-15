@@ -4,27 +4,32 @@ import "github.com/charmbracelet/lipgloss"
 
 // Icons are nerd-font glyphs used throughout the UI. They degrade to mojibake
 // on terminals without a nerd font, but layout is unaffected.
+//
+// These are written as \U escapes (not literal glyphs) on purpose: the
+// codepoints live in the Private Use Area, and pasted literals get silently
+// stripped by some editors and tooling, leaving empty strings. Escapes are
+// plain ASCII and survive. Codepoints from the Nerd Fonts glyph map.
 const (
-	IconCalendar = "" // nf-md-calendar
-	IconContacts = "" // nf-md-account_box
-	IconEvent    = "" // nf-md-calendar_blank
-	IconAllDay   = "" // nf-md-white_balance_sunny
-	IconTask     = "" // nf-md-checkbox_marked_outline
-	IconClock    = "" // nf-md-clock_outline
-	IconLocation = "" // nf-md-map_marker
-	IconPerson   = "" // nf-md-account
-	IconEmail    = "" // nf-md-email
-	IconPhone    = "" // nf-md-phone
-	IconCake     = "" // nf-md-cake_variant
-	IconOrg      = "" // nf-md-office_building
-	IconNote     = "" // nf-md-note_text
+	IconCalendar = "\U000F00ED" // nf-md-calendar
+	IconContacts = "\U000F0006" // nf-md-account_box
+	IconEvent    = "\U000F00EE" // nf-md-calendar_blank
+	IconAllDay   = "\U000F05A8" // nf-md-white_balance_sunny
+	IconTask     = "\U000F0135" // nf-md-checkbox_marked_outline
+	IconClock    = "\U000F0150" // nf-md-clock_outline
+	IconLocation = "\U000F034E" // nf-md-map_marker
+	IconPerson   = "\U000F0004" // nf-md-account
+	IconEmail    = "\U000F01EE" // nf-md-email
+	IconPhone    = "\U000F03F2" // nf-md-phone
+	IconCake     = "\U000F00EB" // nf-md-cake_variant
+	IconOrg      = "\U000F0991" // nf-md-office_building
+	IconNote     = "\U000F039E" // nf-md-note_text
 	IconDot      = "●"
-	IconCheckOn  = ""
-	IconCheckOff = ""
-	IconSearch   = ""
-	IconRepeat   = "" // nf-md-repeat
-	IconCloud    = "" // nf-md-cloud_outline — a remote (DAV) source
-	IconDisk     = "" // nf-md-folder — a local (vdir) source
+	IconCheckOn  = "\U000F0132" // nf-md-checkbox_marked
+	IconCheckOff = "\U000F0131" // nf-md-checkbox_blank_outline
+	IconSearch   = "\U000F0349" // nf-md-magnify
+	IconRepeat   = "\U000F0456" // nf-md-repeat
+	IconCloud    = "\U000F0163" // nf-md-cloud_outline — a remote (DAV) source
+	IconDisk     = "\U000F024B" // nf-md-folder — a local (vdir) source
 )
 
 // sourceGlyph returns the provenance glyph for a source type.
