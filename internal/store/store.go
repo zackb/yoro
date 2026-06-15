@@ -6,6 +6,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zackb/yoro/internal/model"
 	"github.com/zackb/yoro/internal/store/dav"
@@ -71,8 +72,12 @@ func DAVSource(ctx context.Context, id, name, endpoint, username, password strin
 	}, nil
 }
 
-// Compile-time assurance that the DAV backend satisfies Backend (read-only).
-var _ Backend = (*dav.DAV)(nil)
+// Compile-time assurance that the DAV backend satisfies WriteBackend.
+var _ WriteBackend = (*dav.DAV)(nil)
+
+// ErrReadOnly is returned when a create targets a source whose backend does not
+// support writing.
+var ErrReadOnly = errors.New("store: source is read-only")
 
 // Domain selects what a search ranges over.
 type Domain int
@@ -114,4 +119,9 @@ type Store interface {
 	Search(domain Domain, query string) []Match
 	// Reload re-scans a single collection (seam for future fsnotify/sync).
 	Reload(ctx context.Context, colID string) error
+	// CreateEvent persists a new event into colID and refreshes that collection.
+	// Returns ErrReadOnly if the owning source can't be written.
+	CreateEvent(ctx context.Context, colID string, e model.Event) error
+	// CreateContact persists a new contact into colID and refreshes it.
+	CreateContact(ctx context.Context, colID string, c model.Contact) error
 }

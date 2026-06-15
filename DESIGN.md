@@ -98,8 +98,22 @@ When editing a value (an email, a NOTE/DESCRIPTION):
 
 ### Suggested phasing (editing milestone)
 
-1. Single-field edit + save (insert mode, atomic write, undo) — proves the write
-   path end-to-end.
-2. Add/delete fields and records (`o`, `dd`, create new contact/event).
-3. Visual mode for bulk record operations (the yazi-parity win).
-4. Richer in-field vim motions for multi-line values.
+1. **Done — create new records.** `a` opens a minimal modal form (Summary/Date/
+   Time/Duration for events; Name/Email/Phone for contacts) targeting the
+   selected collection. `store.CreateEvent`/`CreateContact` route to
+   `WriteBackend` (local atomic temp+rename, or DAV `PUT`), generate a UUID, then
+   `Reload` the collection. Builders live in `internal/ical/encode.go` and
+   `internal/vcard/encode.go` (`BuildEvent`/`BuildContact` + `Marshal`), shared by
+   both backends; timed events are written in UTC to avoid a `TZID=Local`.
+2. Editing existing records (load values into the form / vim-modal field edit),
+   bumping `SEQUENCE`/`REV` and using `If-Match` for DAV.
+3. Delete (`dd`) — local file remove, DAV delete. Interface methods are stubbed.
+4. Visual mode for bulk record operations; richer in-field vim motions.
+
+### Note: local collection IDs are namespaced by domain
+
+A collection ID is `source <US> domain/relpath` (e.g. `local<US>calendars/icloud`).
+The `calendars/` vs `contacts/` segment is essential: a calendar and an address
+book can share a directory basename (e.g. both `icloud`), and without the domain
+segment they collapse to the same `colByID` key — which silently mis-routed
+`Reload` (and thus create) before this was fixed.

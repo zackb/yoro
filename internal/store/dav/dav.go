@@ -6,14 +6,12 @@
 package dav
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
-	goical "github.com/emersion/go-ical"
-	govcard "github.com/emersion/go-vcard"
 	"github.com/emersion/go-webdav"
 	"github.com/emersion/go-webdav/caldav"
 	"github.com/emersion/go-webdav/carddav"
@@ -144,7 +142,7 @@ func (d *DAV) fetchCalendar(ctx context.Context, colID string) (ical.File, error
 		if o.Data == nil {
 			continue
 		}
-		data, err := encodeICal(o.Data)
+		data, err := ical.Marshal(o.Data)
 		if err != nil {
 			continue
 		}
@@ -173,7 +171,7 @@ func (d *DAV) Contacts(ctx context.Context, colID string) ([]model.Contact, erro
 	}
 	var out []model.Contact
 	for _, o := range objs {
-		data, err := encodeVCard(o.Card)
+		data, err := vcard.Marshal(o.Card)
 		if err != nil {
 			continue
 		}
@@ -189,18 +187,41 @@ func (d *DAV) Contacts(ctx context.Context, colID string) ([]model.Contact, erro
 	return out, nil
 }
 
-func encodeICal(cal *goical.Calendar) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := goical.NewEncoder(&buf).Encode(cal); err != nil {
-		return nil, err
+// PutEvent creates or replaces a calendar object. For create the UID is fresh,
+// so the object path (<collection>/<UID>.ics) is new; go-webdav issues a plain
+// PUT (no If-None-Match yet). The returned ETag is recorded on the model.
+func (d *DAV) PutEvent(ctx context.Context, colID string, e model.Event) error {
+	if d.cal == nil {
+		return fmt.Errorf("dav: source %q has no calendars", d.sourceID)
 	}
-	return buf.Bytes(), nil
+	path := objectPath(model.NativeID(d.sourceID, colID), e.UID, ".ics")
+	_, err := d.cal.PutCalendarObject(ctx, path, ical.BuildEvent(e))
+	return err
 }
 
-func encodeVCard(card govcard.Card) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := govcard.NewEncoder(&buf).Encode(card); err != nil {
-		return nil, err
+// PutContact creates or replaces an address object.
+func (d *DAV) PutContact(ctx context.Context, colID string, c model.Contact) error {
+	if d.card == nil {
+		return fmt.Errorf("dav: source %q has no address books", d.sourceID)
 	}
-	return buf.Bytes(), nil
+	path := objectPath(model.NativeID(d.sourceID, colID), c.UID, ".vcf")
+	_, err := d.card.PutAddressObject(ctx, path, vcard.BuildContact(c))
+	return err
+}
+
+// DeleteEvent and DeleteContact are not yet implemented (create-only milestone).
+func (d *DAV) DeleteEvent(ctx context.Context, colID, uid string) error {
+	return errNotImplemented
+}
+
+func (d *DAV) DeleteContact(ctx context.Context, colID, uid string) error {
+	return errNotImplemented
+}
+
+var errNotImplemented = fmt.Errorf("dav: delete not implemented")
+
+// objectPath joins a collection href and a UID-derived filename into the object
+// href used for PUT, tolerating a missing trailing slash on the collection.
+func objectPath(collection, uid, ext string) string {
+	return strings.TrimSuffix(collection, "/") + "/" + uid + ext
 }

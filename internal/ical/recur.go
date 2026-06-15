@@ -50,6 +50,12 @@ func occurrenceAt(e *model.Event, start time.Time) model.Occurrence {
 	if dur < 0 {
 		dur = 0
 	}
+	// Render in the viewer's local zone so a UTC- or TZID-stored instant shows the
+	// right wall-clock and lands on the right agenda day. All-day events are
+	// date-only and must not shift across zones.
+	if !e.AllDay {
+		start = start.Local()
+	}
 	return model.Occurrence{
 		UID:          e.UID,
 		CollectionID: e.CollectionID,

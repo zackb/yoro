@@ -109,6 +109,44 @@ func TestParseUnescapesText(t *testing.T) {
 	}
 }
 
+// TestExpandLocalizesTimedOccurrence guards against rendering events in their
+// stored zone: a UTC-stored time must surface as a local-zone occurrence so the
+// agenda shows the right wall-clock and groups it under the right day.
+func TestExpandLocalizesTimedOccurrence(t *testing.T) {
+	const ev = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:z1
+DTSTAMP:20260601T000000Z
+DTSTART:20260616T032000Z
+DTEND:20260616T040500Z
+SUMMARY:Evening
+END:VEVENT
+END:VCALENDAR
+`
+	f, err := Parse([]byte(ev), "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	occs := Expand(&f.Events[0],
+		time.Date(2026, 6, 1, 0, 0, 0, 0, time.Local),
+		time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local))
+	if len(occs) != 1 {
+		t.Fatalf("want 1 occurrence, got %d", len(occs))
+	}
+	o := occs[0]
+	want := time.Date(2026, 6, 16, 3, 20, 0, 0, time.UTC)
+	if !o.Start.Equal(want) {
+		t.Errorf("instant changed: got %s want %s", o.Start, want)
+	}
+	if o.Start.Location() != time.Local {
+		t.Errorf("occurrence not localized: location=%s", o.Start.Location())
+	}
+	if got, wantDay := o.Day().Format("2006-01-02"), want.In(time.Local).Format("2006-01-02"); got != wantDay {
+		t.Errorf("agenda day = %s, want %s", got, wantDay)
+	}
+}
+
 func TestParseAllDay(t *testing.T) {
 	f, err := Parse([]byte(allDayEvent), "home")
 	if err != nil {

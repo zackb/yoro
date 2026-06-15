@@ -232,6 +232,14 @@ func (p *contactsPane) moveTo(i int) {
 	p.curIdx = clamp(i, 0, max0(len(p.filtered)-1))
 }
 
+// selectedBook returns the active address book, the target for a new contact.
+func (p *contactsPane) selectedBook() (model.Collection, bool) {
+	if p.bookIdx < 0 || p.bookIdx >= len(p.books) {
+		return model.Collection{}, false
+	}
+	return p.books[p.bookIdx], true
+}
+
 func (p *contactsPane) selected() (model.Contact, bool) {
 	if p.curIdx < 0 || p.curIdx >= len(p.filtered) {
 		return model.Contact{}, false

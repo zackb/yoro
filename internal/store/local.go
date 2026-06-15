@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,8 +30,8 @@ func NewLocal(sourceID, calendarsDir, contactsDir string) *Local {
 	return &Local{sourceID: sourceID, calendarsDir: calendarsDir, contactsDir: contactsDir}
 }
 
-// Local satisfies Backend (not WriteBackend) by design.
-var _ Backend = (*Local)(nil)
+// Local is a read/write backend.
+var _ WriteBackend = (*Local)(nil)
 
 func (l *Local) Collections(ctx context.Context) ([]model.Collection, error) {
 	var cols []model.Collection
@@ -89,14 +90,82 @@ func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, er
 	return contacts, err
 }
 
+// PutEvent writes a new or replacement .ics file for the event, named by UID.
+func (l *Local) PutEvent(ctx context.Context, colID string, e model.Event) error {
+	data, err := ical.Marshal(ical.BuildEvent(e))
+	if err != nil {
+		return err
+	}
+	return writeAtomic(l.dirFor(colID, model.KindCalendar), e.UID+".ics", data)
+}
+
+// PutContact writes a new or replacement .vcf file for the contact, named by UID.
+func (l *Local) PutContact(ctx context.Context, colID string, c model.Contact) error {
+	data, err := vcard.Marshal(vcard.BuildContact(c))
+	if err != nil {
+		return err
+	}
+	return writeAtomic(l.dirFor(colID, model.KindAddressBook), c.UID+".vcf", data)
+}
+
+// DeleteEvent and DeleteContact are not yet implemented (create-only milestone).
+func (l *Local) DeleteEvent(ctx context.Context, colID, uid string) error {
+	return errNotImplemented
+}
+
+func (l *Local) DeleteContact(ctx context.Context, colID, uid string) error {
+	return errNotImplemented
+}
+
+var errNotImplemented = errors.New("local: delete not implemented")
+
+// writeAtomic writes data to name within dir via a temp file + rename, so a
+// reader never observes a half-written file. The collection dir is created if
+// missing.
+func writeAtomic(dir, name string, data []byte) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".yoro-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
 // dirFor resolves a source-namespaced collection ID back to an absolute
-// directory by stripping the source prefix and joining onto the right root.
+// directory by stripping the source+domain prefix and joining onto the right root.
 func (l *Local) dirFor(colID string, kind model.Kind) string {
 	root := l.calendarsDir
 	if kind == model.KindAddressBook {
 		root = l.contactsDir
 	}
-	return filepath.Join(root, model.NativeID(l.sourceID, colID))
+	rel := strings.TrimPrefix(model.NativeID(l.sourceID, colID), domainDir(kind)+"/")
+	return filepath.Join(root, rel)
+}
+
+// domainDir is the path segment that distinguishes calendar collections from
+// address books in a collection ID, so a calendar and an address book that share
+// a directory basename (e.g. both "icloud") don't collapse to the same ID.
+func domainDir(kind model.Kind) string {
+	if kind == model.KindAddressBook {
+		return "contacts"
+	}
+	return "calendars"
 }
 
 // discover walks root and returns every directory that directly contains a file
@@ -122,7 +191,7 @@ func discover(root, ext string, kind model.Kind, sourceID string) ([]model.Colle
 		seen[dir] = true
 		rel, _ := filepath.Rel(root, dir)
 		cols = append(cols, model.Collection{
-			ID:     model.NamespaceID(sourceID, rel),
+			ID:     model.NamespaceID(sourceID, domainDir(kind)+"/"+rel),
 			Source: sourceID,
 			Name:   collectionName(dir),
 			Color:  model.ParseColor(readMeta(dir, "color")),

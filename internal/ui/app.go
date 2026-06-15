@@ -54,6 +54,7 @@ type App struct {
 	loadErr error
 	spin    spinner.Model
 
+	create   *createForm // non-nil while the create overlay is open
 	showHelp bool
 	status   string
 }
@@ -122,6 +123,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The create overlay is modal: it captures all keys until submit/cancel.
+	if a.create != nil {
+		return a.handleCreate(msg)
+	}
+
 	// When a pane owns text input (search), route everything to it first.
 	if a.activePane().isSearching() {
 		cmd, _ := a.activePane().Update(msg)
@@ -153,10 +159,89 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Reload):
 		a.loading = true
 		return a, tea.Batch(a.spin.Tick, a.load)
+	case key.Matches(msg, a.keys.Create):
+		a.openCreate()
+		return a, nil
 	}
 
 	cmd, _ := a.activePane().Update(msg)
 	return a, cmd
+}
+
+// openCreate opens the create overlay targeting the current pane's selected
+// collection, or sets a pane status if there's nothing to target.
+func (a *App) openCreate() {
+	switch a.mode {
+	case ModeCalendar:
+		col, ok := a.cal.selectedCalendar()
+		if !ok {
+			a.cal.status = "no calendar selected"
+			return
+		}
+		a.create = newEventForm(a.theme, col, a.sourceName(col.Source))
+	case ModeContacts:
+		col, ok := a.con.selectedBook()
+		if !ok {
+			a.con.status = "no address book selected"
+			return
+		}
+		a.create = newContactForm(a.theme, col, a.sourceName(col.Source))
+	}
+}
+
+// handleCreate routes a key to the open create overlay, persisting on submit.
+func (a App) handleCreate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	submitted, cancelled, cmd := a.create.update(msg)
+	switch {
+	case cancelled:
+		a.create = nil
+	case submitted:
+		if err := a.submitCreate(); err != nil {
+			a.create.err = err.Error()
+		} else {
+			a.create = nil
+		}
+	}
+	return a, cmd
+}
+
+// submitCreate builds the model from the form, persists it via the store, and
+// refreshes the affected pane. A returned error is shown in the form.
+func (a App) submitCreate() error {
+	ctx := context.Background()
+	switch a.create.domain {
+	case ModeCalendar:
+		e, err := a.create.buildEvent()
+		if err != nil {
+			return err
+		}
+		if err := a.store.CreateEvent(ctx, a.create.target.ID, e); err != nil {
+			return err
+		}
+		a.cal.refresh()
+		a.cal.status = "created event"
+	case ModeContacts:
+		c, err := a.create.buildContact()
+		if err != nil {
+			return err
+		}
+		if err := a.store.CreateContact(ctx, a.create.target.ID, c); err != nil {
+			return err
+		}
+		a.con.refresh()
+		a.con.status = "created contact"
+	}
+	return nil
+}
+
+// sourceName resolves a source id to its display name.
+func (a App) sourceName(id string) string {
+	for _, s := range a.store.Sources() {
+		if s.ID == id {
+			return s.Name
+		}
+	}
+	return id
 }
 
 // layout assigns sizes to the panes (full width, height minus the status bar).
@@ -181,6 +266,9 @@ func (a App) View() string {
 	if a.loadErr != nil {
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
 			a.theme.Title.Render("Yoro")+"\n\nfailed to load: "+a.loadErr.Error())
+	}
+	if a.create != nil {
+		return a.create.view(a.width, a.height)
 	}
 	if a.showHelp {
 		return a.helpView()
@@ -232,6 +320,7 @@ func (a App) helpView() string {
 		"",
 		section(a.theme, "Global"),
 		row(a.theme, "tab / 1 / 2", "switch calendar / contacts"),
+		row(a.theme, "a", "new event / contact"),
 		row(a.theme, "R", "reload from disk"),
 		row(a.theme, "? ", "toggle this help"),
 		row(a.theme, "q / ctrl+c", "quit"),

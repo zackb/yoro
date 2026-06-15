@@ -22,8 +22,9 @@ navigator and per-collection color toggles; recurring events are expanded on the
 fly. The Contacts mode shows a three-column address book / contact list / detail
 view with live search.
 .PP
-This release is read-only for both local and DAV sources. Editing (local files
-and DAV writes) is planned.
+New events and contacts can be created (see the \fBa\fR key) and are persisted to
+the owning source \(em a local file or a DAV \fBPUT\fR. Editing and deleting
+existing items are planned.
 .SH OPTIONS
 .TP
 .B \-\-calendars \fIDIR\fR
@@ -41,6 +42,9 @@ Print the version and exit.
 .TP
 .B tab, 1, 2
 Switch between Calendar and Contacts.
+.TP
+.B a
+Create a new event (calendar) or contact (contacts) in the selected collection.
 .TP
 .B R
 Reload all data from disk.

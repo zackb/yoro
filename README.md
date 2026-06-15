@@ -17,9 +17,9 @@ If you love [`yazi`](https://github.com/sxyazi/yazi), Yoro should feel like home
 miller-column navigation, a live preview pane that follows your cursor, nerd-font icons,
 and vim keybindings throughout.
 
-> **Status: early.** Yoro is a polished **read-only** browser for local *and* CalDAV/CardDAV
-> calendars and contacts. Writing (local files and DAV `PUT`s) is planned and the
-> architecture is built around that seam — see [DESIGN.md](DESIGN.md) — but not implemented yet.
+> **Status: early.** Yoro browses local *and* CalDAV/CardDAV calendars and contacts, and can
+> **create** new events and contacts (press `a`), persisted to the local file or the DAV server.
+> Editing and deleting existing items are next — see [DESIGN.md](DESIGN.md).
 
 ## Features
 
@@ -126,6 +126,7 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `ctrl+d` / `ctrl+u` | Half-page down / up                        |
 | `/`            | Search within the current pane                  |
 | `n` / `N`      | Next / previous search match                    |
+| `a`            | Create a new event / contact in the selected collection |
 | `R`            | Reload the store from disk                       |
 | `?`            | Toggle help                                     |
 | `q` / `ctrl+c` | Quit                                            |
@@ -162,9 +163,10 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 
 - [x] Read-only local browsing (Calendar + Contacts) — **Milestone 1**
 - [x] Read-only CalDAV/CardDAV browsing + multi-source provenance
-- [ ] Editing `.ics`/`.vcf` files in place — vim-style modal editing with visual
+- [x] Create new events and contacts (local file write + DAV `PUT`)
+- [ ] Editing existing items in place — vim-style modal editing with visual
   mode; see [DESIGN.md](DESIGN.md)
-- [ ] CalDAV/CardDAV writes (`If-Match` `PUT`s on the same write seam)
+- [ ] Deleting items; `If-Match` conditional `PUT`s once go-webdav exposes them
 - [ ] Full month-grid calendar view (toggle)
 
 ## License

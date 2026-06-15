@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zackb/yoro/internal/ical"
@@ -154,6 +155,52 @@ func (s *memStore) Reload(ctx context.Context, colID string) error {
 		s.mu.Unlock()
 	}
 	return nil
+}
+
+func (s *memStore) CreateEvent(ctx context.Context, colID string, e model.Event) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if e.UID == "" {
+		e.UID = uuid.NewString()
+	}
+	e.CollectionID = colID
+	if err := wb.PutEvent(ctx, colID, e); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
+func (s *memStore) CreateContact(ctx context.Context, colID string, c model.Contact) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if c.UID == "" {
+		c.UID = uuid.NewString()
+	}
+	c.CollectionID = colID
+	if err := wb.PutContact(ctx, colID, c); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
+// writeBackendFor returns the writable backend owning colID, or ErrReadOnly if
+// the collection is unknown or its source can't be written.
+func (s *memStore) writeBackendFor(colID string) (WriteBackend, error) {
+	s.mu.RLock()
+	col, ok := s.colByID[colID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, ErrReadOnly
+	}
+	wb, ok := s.backends[col.Source].(WriteBackend)
+	if !ok {
+		return nil, ErrReadOnly
+	}
+	return wb, nil
 }
 
 func (s *memStore) Collections() []model.Collection {

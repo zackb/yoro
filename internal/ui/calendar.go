@@ -284,6 +284,15 @@ func (p *calendarPane) ensureWindow(day time.Time) {
 	}
 }
 
+// selectedCalendar returns the sidebar-highlighted calendar, the target for a
+// new event.
+func (p *calendarPane) selectedCalendar() (model.Collection, bool) {
+	if p.sidebarIdx < 0 || p.sidebarIdx >= len(p.cals) {
+		return model.Collection{}, false
+	}
+	return p.cals[p.sidebarIdx], true
+}
+
 func (p *calendarPane) selectedOcc() (model.Occurrence, bool) {
 	if p.curIdx < 0 || p.curIdx >= len(p.selRows) {
 		return model.Occurrence{}, false
