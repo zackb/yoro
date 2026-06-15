@@ -11,10 +11,16 @@ import (
 	"github.com/zackb/yoro/internal/store"
 )
 
+// localSource builds a single local source from the default config locations.
+func localSource() store.Source {
+	s := config.Default().Sources[0]
+	return store.LocalSource(s.Name, s.Name, s.Calendars, s.Contacts)
+}
+
 // TestRenderSmoke loads the real local data and prints rendered frames for both
 // modes. Run with: go test ./internal/ui -run RenderSmoke -v
 func TestRenderSmoke(t *testing.T) {
-	st := store.New(store.NewLocal(config.Default()))
+	st := store.New(localSource())
 	if err := st.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +47,7 @@ func TestRenderSmoke(t *testing.T) {
 // TestInteractions drives many keypresses across both modes to ensure none of
 // the index math panics and View always renders.
 func TestInteractions(t *testing.T) {
-	st := store.New(store.NewLocal(config.Default()))
+	st := store.New(localSource())
 	if err := st.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}

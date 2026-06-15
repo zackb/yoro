@@ -3,7 +3,22 @@
 // future CalDAV/CardDAV backend without import cycles.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// idSep separates a source id from a backend-native collection identifier (a
+// filesystem path, a DAV href, …) inside a globally-unique Collection.ID. It is
+// invisible and never appears in either part.
+const idSep = "\x1f"
+
+// NamespaceID builds a globally-unique collection ID from a source id and a
+// backend-native identifier, so collections from different sources never collide.
+func NamespaceID(sourceID, native string) string { return sourceID + idSep + native }
+
+// NativeID recovers the backend-native identifier from a namespaced collection ID.
+func NativeID(sourceID, id string) string { return strings.TrimPrefix(id, sourceID+idSep) }
 
 // Kind distinguishes a calendar collection from an address book.
 type Kind int
@@ -16,11 +31,12 @@ const (
 // Collection is a calendar or address book: one directory on disk, or one
 // collection on a remote DAV server.
 type Collection struct {
-	ID    string // stable identifier (relative path for local backends)
-	Name  string // human display name (from the displayname file, may contain emoji)
-	Color Color  // normalized #RRGGBB, empty if none
-	Kind  Kind
-	Path  string // filesystem path for local backends; empty otherwise
+	ID     string // stable identifier, unique across sources (source-namespaced)
+	Source string // id of the owning source (which backend it came from)
+	Name   string // human display name (from the displayname file, may contain emoji)
+	Color  Color  // normalized #RRGGBB, empty if none
+	Kind   Kind
+	Path   string // filesystem path for local backends; empty otherwise
 }
 
 // DateRange is a half-open time window [From, To).

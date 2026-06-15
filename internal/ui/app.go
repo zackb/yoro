@@ -202,7 +202,11 @@ func (a App) statusBar() string {
 	}
 
 	status := a.paneStatus()
-	hints := a.theme.StatusBar.Render("h/j/k/l move · / search · tab switch · ? help · q quit")
+	hintText := "h/j/k/l move · / search · tab switch · ? help · q quit"
+	if a.mode == ModeContacts && len(a.con.sources) > 1 {
+		hintText = "s source · " + hintText
+	}
+	hints := a.theme.StatusBar.Render(hintText)
 
 	left := calChip + " " + conChip
 	if status != "" {
@@ -248,6 +252,7 @@ func (a App) helpView() string {
 		"",
 		section(a.theme, "Contacts"),
 		row(a.theme, "y", "yank email/phone to clipboard"),
+		row(a.theme, "s", "switch source (local / DAV)"),
 		"",
 		a.theme.Help.Render("press ? or esc to close"),
 	}

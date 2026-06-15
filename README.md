@@ -2,24 +2,30 @@
 
 > A blazing-fast, terminal UI for your contacts and calendar.
 
-Yoro is a TUI for browsing (and, soon, editing) calendars and contacts that live on
-disk in the standard [vdirsyncer](https://vdirsyncer.pimutils.org/)/[khal](https://lostpackets.de/khal/)
-layout — `~/.local/share/calendars` and `~/.local/share/contacts`. It reads and writes
-plain iCalendar (`.ics`) and vCard (`.vcf`) files directly, and is designed to sync with
-CalDAV/CardDAV servers with full read/write capability.
+Yoro is a TUI for browsing (and, soon, editing) calendars and contacts from two kinds of
+**source**, treated as co-equal first-class citizens:
+
+- **Local vdir trees** in the standard [vdirsyncer](https://vdirsyncer.pimutils.org/)/[khal](https://lostpackets.de/khal/)
+  layout — plain iCalendar (`.ics`) and vCard (`.vcf`) files on disk.
+- **Remote CalDAV/CardDAV servers** (iCloud, Fastmail, Nextcloud, Google, …), read live.
+
+You can browse several sources at once; every collection shows where it came from. Yoro is
+a *pure client* to each source — it never syncs sources to each other. Keeping a local vdir
+in step with a DAV server is [vdirsyncer's](docs/vdirsyncer.md) job, by design.
 
 If you love [`yazi`](https://github.com/sxyazi/yazi), Yoro should feel like home:
 miller-column navigation, a live preview pane that follows your cursor, nerd-font icons,
 and vim keybindings throughout.
 
-> **Status: early.** Milestone 1 is a polished, **read-only** browser for your local
-> calendars and contacts. Writing files and CalDAV/CardDAV sync are planned and the
-> architecture is built around those seams, but they are not implemented yet.
+> **Status: early.** Yoro is a polished **read-only** browser for local *and* CalDAV/CardDAV
+> calendars and contacts. Writing (local files and DAV `PUT`s) is planned and the
+> architecture is built around that seam — see [DESIGN.md](DESIGN.md) — but not implemented yet.
 
 ## Features
 
-- **Local-first.** First-class support for the `vdirsyncer`/`khal` on-disk format —
-  per-collection directories with `displayname`/`color` metadata.
+- **Local + DAV.** First-class support for the `vdirsyncer`/`khal` on-disk format
+  (per-collection directories with `displayname`/`color` metadata) *and* live
+  CalDAV/CardDAV servers, browsed together with clear per-collection provenance.
 - **Two modes, one feel.** A Calendar mode and a Contacts mode that share the same vim
   navigation and preview-follows-cursor behavior.
 - **Calendar.** A day-grouped agenda with a mini-month navigator and per-collection color
@@ -56,18 +62,55 @@ make install   # installs to /usr/local by default; override with PREFIX=
 ## Usage
 
 ```sh
-yoro                 # open on the default (calendars + contacts) store
-yoro --config PATH   # use an alternate config file
+yoro                              # browse the configured sources
+yoro --calendars DIR --contacts DIR   # override the default local source's paths
 ```
 
-By default Yoro reads:
+With no config file, Yoro reads a single local source from:
 
 | Data      | Path                              |
 | --------- | --------------------------------- |
 | Calendars | `~/.local/share/calendars`        |
 | Contacts  | `~/.local/share/contacts`         |
 
-These are overridable via the config file or `$YORO_CONFIG`.
+### Configuration
+
+To browse more than one source — e.g. a local vdir plus a remote CalDAV/CardDAV
+account — create `$XDG_CONFIG_HOME/yoro/config.toml` (usually
+`~/.config/yoro/config.toml`). Each `[[sources]]` block is one source, browsed in order.
+
+```toml
+# A local vdir tree (the implicit default if you list no sources).
+[[sources]]
+name = "local"
+type = "local"
+calendars = "~/.local/share/calendars"
+contacts  = "~/.local/share/contacts"
+
+# A remote CalDAV/CardDAV account.
+[[sources]]
+name = "iCloud"
+type = "dav"
+url  = "https://caldav.icloud.com/"
+username = "you@icloud.com"
+# Resolve the secret from a command so no plaintext lives in the config.
+password_command = "pass icloud/yoro"
+# password = "..."   # alternatively, an inline secret (discouraged)
+```
+
+Notes:
+
+- **Source names must be unique** — the name is the source's identity.
+- **`password_command`** is run via the shell and its first line is used as the
+  password (`pass`, `secret-tool`, `op read`, … all work). Prefer it over `password`.
+- **Calendars** from every source are shown together (tagged by source) and overlaid
+  in the agenda. **Contacts** show one source at a time — press `s` to switch — which
+  avoids seeing every person twice when a local vdir mirrors a DAV account.
+- **Split CalDAV/CardDAV hosts (iCloud):** Apple serves calendars and contacts from
+  different hostnames (`caldav.icloud.com` vs `contacts.icloud.com`). Yoro probes both
+  protocols at the `url` you give; if a provider splits them, add two `dav` sources, one
+  per host.
+- Yoro does **not** sync sources — see [docs/vdirsyncer.md](docs/vdirsyncer.md).
 
 ### Keybindings
 
@@ -102,6 +145,7 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | Key | Action                                              |
 | --- | --------------------------------------------------- |
 | `y` | Yank the highlighted email/phone to the clipboard   |
+| `s` | Switch the active contacts source (local / DAV)     |
 
 ## Development
 
@@ -117,9 +161,10 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 ## Roadmap
 
 - [x] Read-only local browsing (Calendar + Contacts) — **Milestone 1**
+- [x] Read-only CalDAV/CardDAV browsing + multi-source provenance
 - [ ] Editing `.ics`/`.vcf` files in place — vim-style modal editing with visual
   mode; see [DESIGN.md](DESIGN.md)
-- [ ] CalDAV/CardDAV sync (read/write)
+- [ ] CalDAV/CardDAV writes (`If-Match` `PUT`s on the same write seam)
 - [ ] Full month-grid calendar view (toggle)
 
 ## License

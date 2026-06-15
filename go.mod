@@ -3,11 +3,13 @@ module github.com/zackb/yoro
 go 1.26.4
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/emersion/go-ical v0.0.0-20250609112844-439c63cef608
 	github.com/emersion/go-vcard v0.0.0-20241024213814-c9703dde27ff
+	github.com/emersion/go-webdav v0.7.0
 	github.com/muesli/reflow v0.3.0
 	github.com/teambition/rrule-go v1.8.2
 	golang.org/x/sync v0.21.0

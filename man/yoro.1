@@ -1,16 +1,20 @@
 .TH YORO 1 "June 2026" "yoro 0.1.0" "User Commands"
 .SH NAME
-yoro \- a terminal UI for local calendars and contacts
+yoro \- a terminal UI for local and CalDAV/CardDAV calendars and contacts
 .SH SYNOPSIS
 .B yoro
 [\fIOPTIONS\fR]
 .SH DESCRIPTION
 .B yoro
-is a terminal user interface for browsing calendars and contacts stored on disk
-in the vdirsyncer/khal layout. It reads iCalendar (\fI.ics\fR) and vCard
-(\fI.vcf\fR) files directly and presents them in a fast, vim-navigated,
-miller-column interface inspired by
+is a terminal user interface for browsing calendars and contacts from any number
+of \fIsources\fR: local vdir trees in the vdirsyncer/khal layout (iCalendar
+\fI.ics\fR and vCard \fI.vcf\fR files) and remote CalDAV/CardDAV servers. It
+presents them in a fast, vim-navigated, miller-column interface inspired by
 .BR yazi (1).
+Collections are tagged with the source they came from. Yoro is a pure client to
+each source and never synchronizes one source to another; use
+.BR vdirsyncer (1)
+to keep a local vdir in step with a DAV server.
 .PP
 The interface has two modes \(em Calendar and Contacts \(em that share the same
 navigation. The Calendar mode shows a day-grouped agenda with a mini-month
@@ -18,15 +22,17 @@ navigator and per-collection color toggles; recurring events are expanded on the
 fly. The Contacts mode shows a three-column address book / contact list / detail
 view with live search.
 .PP
-This release is read-only. Editing files and CalDAV/CardDAV synchronization are
-planned.
+This release is read-only for both local and DAV sources. Editing (local files
+and DAV writes) is planned.
 .SH OPTIONS
 .TP
 .B \-\-calendars \fIDIR\fR
-Override the calendars directory (default \fI~/.local/share/calendars\fR).
+Override the default local source's calendars directory (default
+\fI~/.local/share/calendars\fR).
 .TP
 .B \-\-contacts \fIDIR\fR
-Override the contacts directory (default \fI~/.local/share/contacts\fR).
+Override the default local source's contacts directory (default
+\fI~/.local/share/contacts\fR).
 .TP
 .B \-\-version
 Print the version and exit.
@@ -86,20 +92,39 @@ Toggle visibility of tasks (VTODO).
 .TP
 .B y
 Yank the highlighted email or phone number to the clipboard (via OSC52).
+.TP
+.B s
+Switch the active contacts source (contacts are browsed one source at a time).
+.SH CONFIGURATION
+With no configuration file, Yoro browses a single local source at the default
+directories below. To browse multiple sources \(em e.g. a local vdir plus a
+CalDAV/CardDAV account \(em create
+.I $XDG_CONFIG_HOME/yoro/config.toml
+(usually \fI~/.config/yoro/config.toml\fR) with one \fB[[sources]]\fR table per
+source. A \fBlocal\fR source takes \fBcalendars\fR and \fBcontacts\fR paths; a
+\fBdav\fR source takes \fBurl\fR, \fBusername\fR, and either \fBpassword\fR or
+\fBpassword_command\fR (run via the shell to print the secret). Source names must
+be unique. See \fIdocs/vdirsyncer.md\fR for the local-mirror workflow.
 .SH FILES
 .TP
+.I ~/.config/yoro/config.toml
+Optional configuration file describing sources (honors \fBXDG_CONFIG_HOME\fR).
+.TP
 .I ~/.local/share/calendars
-Default calendars directory. Each subdirectory containing \fI.ics\fR files is a
-calendar collection; optional \fIdisplayname\fR and \fIcolor\fR sibling files set
-the name and color.
+Default local source's calendars directory. Each subdirectory containing
+\fI.ics\fR files is a calendar collection; optional \fIdisplayname\fR and
+\fIcolor\fR sibling files set the name and color.
 .TP
 .I ~/.local/share/contacts
-Default contacts directory. Each subdirectory containing \fI.vcf\fR files is an
-address book.
+Default local source's contacts directory. Each subdirectory containing
+\fI.vcf\fR files is an address book.
 .SH ENVIRONMENT
 .TP
 .B XDG_DATA_HOME
 Used to locate the default data directories when set.
+.TP
+.B XDG_CONFIG_HOME
+Used to locate the configuration file when set.
 .SH SEE ALSO
 .BR yazi (1),
 .BR khal (1),

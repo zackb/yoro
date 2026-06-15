@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/wordwrap"
 
 	"github.com/zackb/yoro/internal/model"
 	"github.com/zackb/yoro/internal/store"
@@ -28,10 +29,12 @@ type calendarPane struct {
 
 	width, height int
 
-	cals       []model.Collection
-	colByID    map[string]model.Collection
-	enabled    map[string]bool
-	sidebarIdx int
+	cals        []model.Collection
+	colByID     map[string]model.Collection
+	enabled     map[string]bool
+	sidebarIdx  int
+	srcType     map[string]string // source id -> type, for provenance glyphs
+	multiSource bool
 
 	window  model.DateRange
 	rows    []agendaRow
@@ -59,6 +62,12 @@ func newCalendarPane(theme Theme, keys KeyMap, st store.Store) *calendarPane {
 
 func (p *calendarPane) refresh() {
 	p.cals = p.store.Calendars()
+	srcs := p.store.Sources()
+	p.multiSource = len(srcs) > 1
+	p.srcType = map[string]string{}
+	for _, s := range srcs {
+		p.srcType[s.ID] = s.Type
+	}
 	p.colByID = map[string]model.Collection{}
 	for _, c := range p.cals {
 		p.colByID[c.ID] = c
@@ -309,6 +318,9 @@ func (p *calendarPane) sidebarBody(w, h int) string {
 		}
 		dot := colorDot(c.Color)
 		label := fmt.Sprintf("%s %s %s", check, dot, c.Name)
+		if p.multiSource {
+			label = fmt.Sprintf("%s %s %s %s", check, sourceGlyph(p.srcType[c.Source]), dot, c.Name)
+		}
 		sel := p.focus == 0 && i == p.sidebarIdx
 		b.WriteString(p.theme.SelectStyle(sel, p.focus == 0).Render(PadRight(Truncate(label, w), w)))
 		b.WriteByte('\n')
@@ -411,8 +423,26 @@ func (p *calendarPane) occRow(o model.Occurrence, w int) string {
 	if o.Event != nil && o.Event.Recurring() {
 		repeat = " " + IconRepeat
 	}
-	line := fmt.Sprintf("%-7s %s %s%s", when, dot, o.Summary, repeat)
+	line := fmt.Sprintf("%-7s %s %s%s", when, dot, oneLine(o.Summary), repeat)
 	return Truncate(line, w)
+}
+
+// detailLines renders an icon-prefixed value that may span multiple lines (e.g.
+// a multi-line address). It word-wraps to the pane width and indents every row
+// after the first under the icon, so both the author's line breaks and long
+// lines survive into the pane instead of being truncated.
+func (p *calendarPane) detailLines(icon, value string, w int) string {
+	iconW := lipgloss.Width(icon) + 1
+	indent := strings.Repeat(" ", iconW)
+	var b strings.Builder
+	for i, line := range wrapLines(value, w-iconW) {
+		prefix := icon + " "
+		if i > 0 {
+			prefix = indent
+		}
+		b.WriteString(p.theme.Value.Render(prefix+line) + "\n")
+	}
+	return b.String()
 }
 
 func (p *calendarPane) detailBody(w int) string {
@@ -421,7 +451,7 @@ func (p *calendarPane) detailBody(w int) string {
 		return p.theme.ItemDim.Render("no selection")
 	}
 	var b strings.Builder
-	b.WriteString(p.theme.Title.Render(Truncate(o.Summary, w)) + "\n\n")
+	b.WriteString(p.theme.Title.Render(Truncate(oneLine(o.Summary), w)) + "\n\n")
 
 	when := o.Start.Format("Mon, Jan 2 2006")
 	if o.AllDay {
@@ -439,7 +469,7 @@ func (p *calendarPane) detailBody(w int) string {
 		return b.String()
 	}
 	if ev.Location != "" {
-		b.WriteString(p.theme.Value.Render(IconLocation+" "+Truncate(ev.Location, w-2)) + "\n")
+		b.WriteString(p.detailLines(IconLocation, ev.Location, w))
 	}
 	if ev.Recurring() {
 		b.WriteString(p.theme.Label.Render(IconRepeat+" "+Truncate(rruleSummary(ev.RRule), w-2)) + "\n")
@@ -490,27 +520,21 @@ func rruleSummary(rule string) string {
 	}
 }
 
+// wrap word-wraps s to width w, preserving the author's line breaks, and clips
+// to at most maxLines rows.
 func wrap(s string, w, maxLines int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	var lines []string
-	for len(s) > 0 && len(lines) < maxLines {
-		if lipgloss.Width(s) <= w {
-			lines = append(lines, s)
-			break
-		}
-		cut := w
-		lines = append(lines, Truncate(s, w))
-		if cut >= len(s) {
-			break
-		}
-		s = s[min(cut, len(s)):]
+	lines := wrapLines(s, w)
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
 	}
 	return strings.Join(lines, "\n")
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+// wrapLines word-wraps s to a display width of w, returning one entry per
+// resulting row. Existing newlines in s are preserved as row breaks.
+func wrapLines(s string, w int) []string {
+	if w < 1 {
+		w = 1
 	}
-	return b
+	return strings.Split(wordwrap.String(s, w), "\n")
 }

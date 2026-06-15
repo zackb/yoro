@@ -77,6 +77,38 @@ func TestParseTimezoneEvent(t *testing.T) {
 	}
 }
 
+const escapedEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:esc-1
+SUMMARY:Do the thing $1\,480.90
+LOCATION:123 Main St\nApt 4\, Springfield
+DTSTART:20260615T093000Z
+DESCRIPTION:Line one\nLine two\; and a \\ backslash
+END:VEVENT
+END:VCALENDAR
+`
+
+func TestParseUnescapesText(t *testing.T) {
+	f, err := Parse([]byte(escapedEvent), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := f.Events[0]
+	if e.Summary != "Do the thing $1,480.90" {
+		t.Errorf("summary not unescaped: %q", e.Summary)
+	}
+	// Line breaks are preserved in the data (flattened only at single-line
+	// render sites); commas are unescaped.
+	if e.Location != "123 Main St\nApt 4, Springfield" {
+		t.Errorf("location not unescaped: %q", e.Location)
+	}
+	// Multi-line field: newline preserved, ; and \ unescaped.
+	if e.Description != "Line one\nLine two; and a \\ backslash" {
+		t.Errorf("description not unescaped: %q", e.Description)
+	}
+}
+
 func TestParseAllDay(t *testing.T) {
 	f, err := Parse([]byte(allDayEvent), "home")
 	if err != nil {

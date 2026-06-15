@@ -39,7 +39,8 @@ type KeyMap struct {
 	Tasks     key.Binding
 
 	// Contacts
-	Yank key.Binding
+	Yank         key.Binding
+	SwitchSource key.Binding
 }
 
 // DefaultKeyMap returns the default bindings.
@@ -74,6 +75,7 @@ func DefaultKeyMap() KeyMap {
 		Toggle:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle collection")),
 		Tasks:     key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "toggle tasks")),
 
-		Yank: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yank")),
+		Yank:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yank")),
+		SwitchSource: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch source")),
 	}
 }

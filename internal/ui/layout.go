@@ -88,6 +88,10 @@ func scrollWindow(lines []string, cursor, height int) ([]string, int) {
 	return lines[top:end], top
 }
 
+// oneLine collapses all whitespace (including line breaks) to single spaces, for
+// values shown on a single row (agenda entries, titles).
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // clamp constrains v to [lo, hi].
 func clamp(v, lo, hi int) int {
 	if v < lo {

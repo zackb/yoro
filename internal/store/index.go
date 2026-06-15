@@ -13,9 +13,11 @@ import (
 	"github.com/zackb/yoro/internal/model"
 )
 
-// memStore is the default in-memory, recurrence-aware Store.
+// memStore is the default in-memory, recurrence-aware Store. It aggregates any
+// number of sources, keying everything by source-namespaced collection ID.
 type memStore struct {
-	backend Backend
+	sources  []SourceInfo
+	backends map[string]Backend // by source id
 
 	mu          sync.RWMutex
 	collections []model.Collection
@@ -25,24 +27,41 @@ type memStore struct {
 	contacts    map[string][]model.Contact
 }
 
-// New builds a Store over the given backend.
-func New(backend Backend) Store {
-	return &memStore{
-		backend:  backend,
+// New builds a Store over the given sources, browsed together.
+func New(sources ...Source) Store {
+	s := &memStore{
+		backends: map[string]Backend{},
 		colByID:  map[string]model.Collection{},
 		events:   map[string][]model.Event{},
 		todos:    map[string][]model.Todo{},
 		contacts: map[string][]model.Contact{},
 	}
+	for _, src := range sources {
+		s.sources = append(s.sources, src.SourceInfo)
+		s.backends[src.ID] = src.Backend
+	}
+	return s
+}
+
+func (s *memStore) Sources() []SourceInfo {
+	return append([]SourceInfo(nil), s.sources...)
 }
 
 func (s *memStore) Load(ctx context.Context) error {
-	cols, err := s.backend.Collections(ctx)
-	if err != nil {
-		return err
+	// Enumerate collections across all sources. A source that fails to
+	// enumerate (e.g. a DAV server is unreachable) is skipped so it can't take
+	// down browsing of the others.
+	var cols []model.Collection
+	for _, si := range s.sources {
+		cs, err := s.backends[si.ID].Collections(ctx)
+		if err != nil {
+			continue
+		}
+		cols = append(cols, cs...)
 	}
 
-	// Parse every collection concurrently, bounded by CPU count.
+	// Parse every collection concurrently, bounded by CPU count. Item-load
+	// failures are tolerated per collection rather than failing the whole load.
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.NumCPU())
 
@@ -53,25 +72,26 @@ func (s *memStore) Load(ctx context.Context) error {
 
 	for _, c := range cols {
 		c := c
+		b := s.backends[c.Source]
+		if b == nil {
+			continue
+		}
 		g.Go(func() error {
 			switch c.Kind {
 			case model.KindCalendar:
-				ev, err := s.backend.Events(gctx, c.ID)
+				ev, err := b.Events(gctx, c.ID)
 				if err != nil {
-					return err
+					return nil
 				}
-				td, err := s.backend.Todos(gctx, c.ID)
-				if err != nil {
-					return err
-				}
+				td, _ := b.Todos(gctx, c.ID)
 				mu.Lock()
 				events[c.ID] = ev
 				todos[c.ID] = td
 				mu.Unlock()
 			case model.KindAddressBook:
-				ct, err := s.backend.Contacts(gctx, c.ID)
+				ct, err := b.Contacts(gctx, c.ID)
 				if err != nil {
-					return err
+					return nil
 				}
 				sortContacts(ct)
 				mu.Lock()
@@ -81,9 +101,7 @@ func (s *memStore) Load(ctx context.Context) error {
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return err
-	}
+	_ = g.Wait()
 
 	byID := make(map[string]model.Collection, len(cols))
 	for _, c := range cols {
@@ -107,13 +125,17 @@ func (s *memStore) Reload(ctx context.Context, colID string) error {
 	if !ok {
 		return nil
 	}
+	b := s.backends[col.Source]
+	if b == nil {
+		return nil
+	}
 	switch col.Kind {
 	case model.KindCalendar:
-		ev, err := s.backend.Events(ctx, colID)
+		ev, err := b.Events(ctx, colID)
 		if err != nil {
 			return err
 		}
-		td, err := s.backend.Todos(ctx, colID)
+		td, err := b.Todos(ctx, colID)
 		if err != nil {
 			return err
 		}
@@ -122,7 +144,7 @@ func (s *memStore) Reload(ctx context.Context, colID string) error {
 		s.todos[colID] = td
 		s.mu.Unlock()
 	case model.KindAddressBook:
-		ct, err := s.backend.Contacts(ctx, colID)
+		ct, err := b.Contacts(ctx, colID)
 		if err != nil {
 			return err
 		}

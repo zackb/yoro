@@ -21,7 +21,12 @@ type contactsPane struct {
 
 	width, height int
 
-	books   []model.Collection
+	allBooks     []model.Collection // every address book, all sources
+	sources      []store.SourceInfo // sources that have at least one book, in order
+	activeSource string             // id of the source whose books are shown
+	counts       map[string]int     // contact count per book ID, computed on refresh
+
+	books   []model.Collection // books of the active source
 	bookIdx int
 
 	all      []model.Contact // contacts of the selected book
@@ -50,9 +55,69 @@ func newContactsPane(theme Theme, keys KeyMap, st store.Store) *contactsPane {
 }
 
 func (p *contactsPane) refresh() {
-	p.books = p.store.AddressBooks()
+	p.allBooks = p.store.AddressBooks()
+	p.sources = sourcesWithBooks(p.store.Sources(), p.allBooks)
+	p.counts = make(map[string]int, len(p.allBooks))
+	for _, b := range p.allBooks {
+		p.counts[b.ID] = len(p.store.Contacts(b.ID))
+	}
+	if _, ok := p.sourceByID(p.activeSource); !ok {
+		p.activeSource = ""
+		if len(p.sources) > 0 {
+			p.activeSource = p.sources[0].ID
+		}
+	}
+	p.filterBooks()
+}
+
+// filterBooks narrows allBooks to the active source. With a single source the
+// filter is a no-op, so behavior is unchanged from before.
+func (p *contactsPane) filterBooks() {
+	p.books = p.books[:0]
+	for _, b := range p.allBooks {
+		if p.activeSource == "" || b.Source == p.activeSource {
+			p.books = append(p.books, b)
+		}
+	}
 	p.bookIdx = clamp(p.bookIdx, 0, max0(len(p.books)-1))
 	p.loadBook()
+}
+
+// cycleSource switches the active contacts source (contacts are browsed one
+// source at a time to avoid duplicate people across mirrored sources).
+func (p *contactsPane) cycleSource() {
+	if len(p.sources) < 2 {
+		return
+	}
+	cur := 0
+	for i, s := range p.sources {
+		if s.ID == p.activeSource {
+			cur = i
+			break
+		}
+	}
+	next := p.sources[(cur+1)%len(p.sources)]
+	p.activeSource = next.ID
+	p.bookIdx = 0
+	p.curIdx = 0
+	p.filterBooks()
+	p.status = "source: " + next.Name
+}
+
+func (p *contactsPane) activeSourceName() string {
+	if s, ok := p.sourceByID(p.activeSource); ok {
+		return s.Name
+	}
+	return ""
+}
+
+func (p *contactsPane) sourceByID(id string) (store.SourceInfo, bool) {
+	for _, s := range p.sources {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return store.SourceInfo{}, false
 }
 
 func (p *contactsPane) loadBook() {
@@ -111,6 +176,8 @@ func (p *contactsPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.startSearch()
 	case key.Matches(km, p.keys.Yank):
 		return p.yank(), true
+	case key.Matches(km, p.keys.SwitchSource):
+		p.cycleSource()
 	case key.Matches(km, p.keys.Escape):
 		if p.query != "" {
 			p.query = ""
@@ -204,7 +271,11 @@ func (p *contactsPane) View() string {
 		detailW = max0(w - bookW - listW)
 	}
 
-	books := p.theme.Column("ADDRESS BOOKS", p.booksBody(bookW-2), bookW, h, p.focus == 0)
+	booksTitle := "ADDRESS BOOKS"
+	if len(p.sources) > 1 {
+		booksTitle = "BOOKS · " + Truncate(p.activeSourceName(), bookW-10)
+	}
+	books := p.theme.Column(booksTitle, p.booksBody(bookW-2), bookW, h, p.focus == 0)
 	listTitle := fmt.Sprintf("CONTACTS (%d)", len(p.filtered))
 	list := p.theme.Column(listTitle, p.listBody(listW-2, h-3), listW, h, p.focus == 1)
 	detail := p.theme.Column("DETAIL", p.detailBody(detailW-2), detailW, h, p.focus == 2)
@@ -216,7 +287,7 @@ func (p *contactsPane) booksBody(w int) string {
 	for i, col := range p.books {
 		sel := i == p.bookIdx
 		label := fmt.Sprintf("%s %s", IconContacts, col.Name)
-		count := fmt.Sprintf(" %d", len(p.store.Contacts(col.ID)))
+		count := fmt.Sprintf(" %d", p.counts[col.ID])
 		line := PadRight(Truncate(label, w-lipgloss.Width(count)), w-lipgloss.Width(count)) + count
 		b.WriteString(p.theme.SelectStyle(sel, p.focus == 0).Render(PadRight(line, w)))
 		b.WriteByte('\n')
@@ -322,4 +393,20 @@ func max0(v int) int {
 		return 0
 	}
 	return v
+}
+
+// sourcesWithBooks returns the sources, in their configured order, that own at
+// least one address book.
+func sourcesWithBooks(sources []store.SourceInfo, books []model.Collection) []store.SourceInfo {
+	present := map[string]bool{}
+	for _, b := range books {
+		present[b.Source] = true
+	}
+	var out []store.SourceInfo
+	for _, s := range sources {
+		if present[s.ID] {
+			out = append(out, s)
+		}
+	}
+	return out
 }

@@ -61,9 +61,9 @@ func parseEvent(c *goical.Component, collectionID string) (model.Event, bool) {
 	ev := model.Event{
 		CollectionID: collectionID,
 		UID:          text(c, goical.PropUID),
-		Summary:      text(c, goical.PropSummary),
-		Description:  text(c, goical.PropDescription),
-		Location:     text(c, goical.PropLocation),
+		Summary:      textValue(c, goical.PropSummary),
+		Description:  textValue(c, goical.PropDescription),
+		Location:     textValue(c, goical.PropLocation),
 		Status:       text(c, goical.PropStatus),
 		Rev:          text(c, "LAST-MODIFIED"),
 	}
@@ -101,7 +101,7 @@ func parseEvent(c *goical.Component, collectionID string) (model.Event, bool) {
 		if child.Name == goical.CompAlarm {
 			ev.Alarms = append(ev.Alarms, model.Alarm{
 				Trigger:     text(child, "TRIGGER"),
-				Description: text(child, goical.PropDescription),
+				Description: textValue(child, goical.PropDescription),
 			})
 		}
 	}
@@ -112,7 +112,7 @@ func parseTodo(c *goical.Component, collectionID string) model.Todo {
 	td := model.Todo{
 		CollectionID: collectionID,
 		UID:          text(c, goical.PropUID),
-		Summary:      text(c, goical.PropSummary),
+		Summary:      textValue(c, goical.PropSummary),
 		Status:       text(c, goical.PropStatus),
 	}
 	if due, _, ok := dateTime(c, "DUE"); ok {
@@ -134,12 +134,47 @@ func parseAttendee(p goical.Prop) model.Attendee {
 	return a
 }
 
-// text returns a property's value, or "" if absent.
+// text returns a property's raw value, or "" if absent. Used for non-TEXT
+// properties (UID, STATUS, dates, durations) that carry no RFC 5545 escaping.
 func text(c *goical.Component, name string) string {
 	if p := c.Props.Get(name); p != nil {
 		return p.Value
 	}
 	return ""
+}
+
+// textValue returns a TEXT property with RFC 5545 escaping removed, preserving
+// any embedded line breaks. Single-line layouts (the agenda row, the detail
+// title) flatten it at render time; the detail pane renders it across lines.
+func textValue(c *goical.Component, name string) string {
+	return unescapeText(text(c, name))
+}
+
+// unescapeText reverses RFC 5545 TEXT escaping: "\\", "\;" and "\," become the
+// literal character and "\n"/"\N" become a newline. Unknown escapes keep their
+// backslash, matching lenient reader behavior.
+func unescapeText(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case 'n', 'N':
+				b.WriteByte('\n')
+				i++
+				continue
+			case '\\', ';', ',':
+				b.WriteByte(s[i+1])
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // dateTime resolves a date or date-time property, honoring a TZID parameter and

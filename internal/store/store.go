@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/zackb/yoro/internal/model"
+	"github.com/zackb/yoro/internal/store/dav"
 )
 
 // Backend reads raw collections and their items. The local filesystem backend
@@ -29,6 +30,50 @@ type WriteBackend interface {
 	DeleteContact(ctx context.Context, colID, uid string) error
 }
 
+// Source kinds, mirroring config source types, used for provenance display.
+const (
+	TypeLocal = "local"
+	TypeDAV   = "dav"
+)
+
+// SourceInfo identifies a configured source for provenance display in the UI.
+type SourceInfo struct {
+	ID   string
+	Name string
+	Type string // TypeLocal | TypeDAV
+}
+
+// Source pairs a backend with its identity. The store browses any number of
+// sources at once; each collection records the source it came from.
+type Source struct {
+	SourceInfo
+	Backend Backend
+}
+
+// LocalSource builds a Source backed by a local filesystem backend.
+func LocalSource(id, name, calendarsDir, contactsDir string) Source {
+	return Source{
+		SourceInfo: SourceInfo{ID: id, Name: name, Type: TypeLocal},
+		Backend:    NewLocal(id, calendarsDir, contactsDir),
+	}
+}
+
+// DAVSource builds a Source backed by a read-only CalDAV/CardDAV backend,
+// connecting and discovering collections eagerly so errors surface at startup.
+func DAVSource(ctx context.Context, id, name, endpoint, username, password string) (Source, error) {
+	b, err := dav.New(ctx, id, endpoint, username, password)
+	if err != nil {
+		return Source{}, err
+	}
+	return Source{
+		SourceInfo: SourceInfo{ID: id, Name: name, Type: TypeDAV},
+		Backend:    b,
+	}, nil
+}
+
+// Compile-time assurance that the DAV backend satisfies Backend (read-only).
+var _ Backend = (*dav.DAV)(nil)
+
 // Domain selects what a search ranges over.
 type Domain int
 
@@ -48,8 +93,10 @@ type Match struct {
 // Store is the UI-facing facade: it caches parsed data, maintains indexes, and
 // expands recurrence within a window.
 type Store interface {
-	// Load scans and parses everything from the backend.
+	// Load scans and parses everything from every source.
 	Load(ctx context.Context) error
+	// Sources returns the configured sources, in order, for provenance display.
+	Sources() []SourceInfo
 	// Collections returns all collections (calendars and address books).
 	Collections() []model.Collection
 	// Calendars returns just calendar collections.

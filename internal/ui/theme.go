@@ -23,7 +23,17 @@ const (
 	IconCheckOff = ""
 	IconSearch   = ""
 	IconRepeat   = "" // nf-md-repeat
+	IconCloud    = "" // nf-md-cloud_outline — a remote (DAV) source
+	IconDisk     = "" // nf-md-folder — a local (vdir) source
 )
+
+// sourceGlyph returns the provenance glyph for a source type.
+func sourceGlyph(sourceType string) string {
+	if sourceType == "dav" {
+		return IconCloud
+	}
+	return IconDisk
+}
 
 // Theme holds the styles for the whole app. A single accent color drives focus.
 type Theme struct {

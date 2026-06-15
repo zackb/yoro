@@ -1,8 +1,9 @@
-// Command yoro is a yazi-inspired terminal UI for browsing local calendars and
-// contacts in the vdirsyncer/khal layout.
+// Command yoro is a yazi-inspired terminal UI for browsing calendars and
+// contacts from local vdir trees and remote CalDAV/CardDAV servers.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -19,8 +20,8 @@ import (
 func main() {
 	var (
 		showVersion = flag.Bool("version", false, "print version and exit")
-		calendars   = flag.String("calendars", "", "override calendars directory")
-		contacts    = flag.String("contacts", "", "override contacts directory")
+		calendars   = flag.String("calendars", "", "override the default local source's calendars directory")
+		contacts    = flag.String("contacts", "", "override the default local source's contacts directory")
 	)
 	flag.Parse()
 
@@ -29,15 +30,20 @@ func main() {
 		return
 	}
 
-	cfg := config.Default()
-	if *calendars != "" {
-		cfg.CalendarsDir = *calendars
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "yoro:", err)
+		os.Exit(1)
 	}
-	if *contacts != "" {
-		cfg.ContactsDir = *contacts
+	applyDirFlags(&cfg, *calendars, *contacts)
+
+	sources, err := buildSources(cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "yoro:", err)
+		os.Exit(1)
 	}
 
-	st := store.New(store.NewLocal(cfg))
+	st := store.New(sources...)
 	app := ui.New(st)
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
@@ -45,4 +51,50 @@ func main() {
 		fmt.Fprintln(os.Stderr, "yoro:", err)
 		os.Exit(1)
 	}
+}
+
+// applyDirFlags lets the --calendars/--contacts flags override the first local
+// source, preserving the pre-config-file behavior.
+func applyDirFlags(cfg *config.Config, calendars, contacts string) {
+	if calendars == "" && contacts == "" {
+		return
+	}
+	for i := range cfg.Sources {
+		if cfg.Sources[i].Type != config.SourceLocal {
+			continue
+		}
+		if calendars != "" {
+			cfg.Sources[i].Calendars = calendars
+		}
+		if contacts != "" {
+			cfg.Sources[i].Contacts = contacts
+		}
+		return
+	}
+}
+
+// buildSources turns config sources into store sources, constructing a backend
+// per source. DAV backends are connected eagerly so credential/connection
+// errors surface at startup.
+func buildSources(cfg config.Config) ([]store.Source, error) {
+	var out []store.Source
+	for _, s := range cfg.Sources {
+		switch s.Type {
+		case config.SourceLocal:
+			out = append(out, store.LocalSource(s.Name, s.Name, s.Calendars, s.Contacts))
+		case config.SourceDAV:
+			secret, err := s.Secret()
+			if err != nil {
+				return nil, fmt.Errorf("source %q: %w", s.Name, err)
+			}
+			src, err := store.DAVSource(context.Background(), s.Name, s.Name, s.URL, s.Username, secret)
+			if err != nil {
+				return nil, fmt.Errorf("source %q: %w", s.Name, err)
+			}
+			out = append(out, src)
+		default:
+			return nil, fmt.Errorf("source %q: unknown type %q", s.Name, s.Type)
+		}
+	}
+	return out, nil
 }

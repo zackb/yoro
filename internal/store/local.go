@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zackb/yoro/internal/config"
 	"github.com/zackb/yoro/internal/ical"
 	"github.com/zackb/yoro/internal/model"
 	"github.com/zackb/yoro/internal/vcard"
@@ -16,25 +15,31 @@ import (
 // Local is a read-only Backend over the vdirsyncer/khal on-disk layout. A
 // collection is any directory that directly contains .ics (calendar) or .vcf
 // (address book) files. Per-collection "displayname" and "color" sibling files
-// are honored.
+// are honored. Collection IDs are namespaced with the source id so they stay
+// unique when several sources are browsed together.
 type Local struct {
-	cfg config.Config
+	sourceID     string
+	calendarsDir string
+	contactsDir  string
 }
 
-// NewLocal constructs a filesystem backend.
-func NewLocal(cfg config.Config) *Local { return &Local{cfg: cfg} }
+// NewLocal constructs a filesystem backend for the given source id over the
+// calendar and contact roots.
+func NewLocal(sourceID, calendarsDir, contactsDir string) *Local {
+	return &Local{sourceID: sourceID, calendarsDir: calendarsDir, contactsDir: contactsDir}
+}
 
 // Local satisfies Backend (not WriteBackend) by design.
 var _ Backend = (*Local)(nil)
 
 func (l *Local) Collections(ctx context.Context) ([]model.Collection, error) {
 	var cols []model.Collection
-	cals, err := discover(l.cfg.CalendarsDir, ".ics", model.KindCalendar)
+	cals, err := discover(l.calendarsDir, ".ics", model.KindCalendar, l.sourceID)
 	if err != nil {
 		return nil, err
 	}
 	cols = append(cols, cals...)
-	books, err := discover(l.cfg.ContactsDir, ".vcf", model.KindAddressBook)
+	books, err := discover(l.contactsDir, ".vcf", model.KindAddressBook, l.sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -84,19 +89,19 @@ func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, er
 	return contacts, err
 }
 
-// dirFor resolves a collection ID (a path relative to its root) to an absolute
-// directory.
+// dirFor resolves a source-namespaced collection ID back to an absolute
+// directory by stripping the source prefix and joining onto the right root.
 func (l *Local) dirFor(colID string, kind model.Kind) string {
-	root := l.cfg.CalendarsDir
+	root := l.calendarsDir
 	if kind == model.KindAddressBook {
-		root = l.cfg.ContactsDir
+		root = l.contactsDir
 	}
-	return filepath.Join(root, colID)
+	return filepath.Join(root, model.NativeID(l.sourceID, colID))
 }
 
 // discover walks root and returns every directory that directly contains a file
-// with the given extension.
-func discover(root, ext string, kind model.Kind) ([]model.Collection, error) {
+// with the given extension, namespacing each collection ID with sourceID.
+func discover(root, ext string, kind model.Kind, sourceID string) ([]model.Collection, error) {
 	info, err := os.Stat(root)
 	if err != nil || !info.IsDir() {
 		return nil, nil // missing root is not fatal; just no collections
@@ -115,13 +120,14 @@ func discover(root, ext string, kind model.Kind) ([]model.Collection, error) {
 			return nil
 		}
 		seen[dir] = true
-		id, _ := filepath.Rel(root, dir)
+		rel, _ := filepath.Rel(root, dir)
 		cols = append(cols, model.Collection{
-			ID:    id,
-			Name:  collectionName(dir),
-			Color: model.ParseColor(readMeta(dir, "color")),
-			Kind:  kind,
-			Path:  dir,
+			ID:     model.NamespaceID(sourceID, rel),
+			Source: sourceID,
+			Name:   collectionName(dir),
+			Color:  model.ParseColor(readMeta(dir, "color")),
+			Kind:   kind,
+			Path:   dir,
 		})
 		return nil
 	})
