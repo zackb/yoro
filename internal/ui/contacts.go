@@ -1,0 +1,325 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/zackb/yoro/internal/model"
+	"github.com/zackb/yoro/internal/store"
+)
+
+// contactsPane is the three-column miller view: books | contacts | detail.
+type contactsPane struct {
+	theme Theme
+	keys  KeyMap
+	store store.Store
+
+	width, height int
+
+	books   []model.Collection
+	bookIdx int
+
+	all      []model.Contact // contacts of the selected book
+	filtered []int           // indices into all (search result / identity)
+	curIdx   int             // index into filtered
+	focus    int             // 0=books, 1=list, 2=detail
+
+	searching bool
+	search    textinput.Model
+	query     string
+
+	status string
+}
+
+func newContactsPane(theme Theme, keys KeyMap, st store.Store) *contactsPane {
+	ti := textinput.New()
+	ti.Prompt = IconSearch + " "
+	ti.Placeholder = "search contacts"
+	return &contactsPane{
+		theme:  theme,
+		keys:   keys,
+		store:  st,
+		search: ti,
+		focus:  1,
+	}
+}
+
+func (p *contactsPane) refresh() {
+	p.books = p.store.AddressBooks()
+	p.bookIdx = clamp(p.bookIdx, 0, max0(len(p.books)-1))
+	p.loadBook()
+}
+
+func (p *contactsPane) loadBook() {
+	p.all = nil
+	if len(p.books) > 0 {
+		p.all = p.store.Contacts(p.books[p.bookIdx].ID)
+	}
+	p.applyFilter()
+}
+
+func (p *contactsPane) applyFilter() {
+	p.filtered = p.filtered[:0]
+	q := strings.ToLower(strings.TrimSpace(p.query))
+	for i, c := range p.all {
+		if q == "" || contactContains(c, q) {
+			p.filtered = append(p.filtered, i)
+		}
+	}
+	p.curIdx = clamp(p.curIdx, 0, max0(len(p.filtered)-1))
+}
+
+func (p *contactsPane) setSize(w, h int) { p.width, p.height = w, h }
+
+func (p *contactsPane) Update(msg tea.Msg) (tea.Cmd, bool) {
+	if p.searching {
+		return p.updateSearch(msg)
+	}
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return nil, false
+	}
+	switch {
+	case key.Matches(km, p.keys.Left):
+		if p.focus > 0 {
+			p.focus--
+		}
+	case key.Matches(km, p.keys.Right):
+		if p.focus < 2 {
+			p.focus++
+		}
+	case key.Matches(km, p.keys.Down):
+		p.move(1)
+	case key.Matches(km, p.keys.Up):
+		p.move(-1)
+	case key.Matches(km, p.keys.HalfDown):
+		p.move(p.listHeight() / 2)
+	case key.Matches(km, p.keys.HalfUp):
+		p.move(-p.listHeight() / 2)
+	case key.Matches(km, p.keys.Bottom):
+		p.moveTo(len(p.filtered) - 1)
+	case key.Matches(km, p.keys.Top):
+		if km.String() == "g" {
+			p.moveTo(0)
+		}
+	case key.Matches(km, p.keys.Search):
+		p.startSearch()
+	case key.Matches(km, p.keys.Yank):
+		return p.yank(), true
+	case key.Matches(km, p.keys.Escape):
+		if p.query != "" {
+			p.query = ""
+			p.applyFilter()
+		}
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+func (p *contactsPane) updateSearch(msg tea.Msg) (tea.Cmd, bool) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "enter":
+			p.query = p.search.Value()
+			p.searching = false
+			p.search.Blur()
+			p.applyFilter()
+			return nil, true
+		case "esc":
+			p.searching = false
+			p.search.Blur()
+			return nil, true
+		}
+	}
+	var cmd tea.Cmd
+	p.search, cmd = p.search.Update(msg)
+	p.query = p.search.Value()
+	p.applyFilter()
+	return cmd, true
+}
+
+func (p *contactsPane) startSearch() {
+	p.searching = true
+	p.focus = 1
+	p.search.SetValue(p.query)
+	p.search.CursorEnd()
+	p.search.Focus()
+}
+
+func (p *contactsPane) move(d int) { p.moveTo(p.curIdx + d) }
+func (p *contactsPane) moveTo(i int) {
+	if p.focus == 0 {
+		if len(p.books) > 0 {
+			p.bookIdx = clamp(i, 0, len(p.books)-1)
+			p.curIdx = 0
+			p.loadBook()
+		}
+		return
+	}
+	p.curIdx = clamp(i, 0, max0(len(p.filtered)-1))
+}
+
+func (p *contactsPane) selected() (model.Contact, bool) {
+	if p.curIdx < 0 || p.curIdx >= len(p.filtered) {
+		return model.Contact{}, false
+	}
+	return p.all[p.filtered[p.curIdx]], true
+}
+
+func (p *contactsPane) yank() tea.Cmd {
+	c, ok := p.selected()
+	if !ok {
+		return nil
+	}
+	var val string
+	switch {
+	case len(c.Emails) > 0:
+		val = c.Emails[0].Value
+	case len(c.Phones) > 0:
+		val = c.Phones[0].Value
+	default:
+		p.status = "nothing to yank"
+		return nil
+	}
+	p.status = "yanked " + val
+	return copyToClipboard(val)
+}
+
+func (p *contactsPane) listHeight() int { return max0(p.height - 2) }
+
+// View renders the three columns side by side within w x h.
+func (p *contactsPane) View() string {
+	w, h := p.width, p.height
+	bookW := 22
+	detailW := clamp(w*38/100, 28, 52)
+	listW := w - bookW - detailW
+	if listW < 16 {
+		listW = 16
+		detailW = max0(w - bookW - listW)
+	}
+
+	books := p.theme.Column("ADDRESS BOOKS", p.booksBody(bookW-2), bookW, h, p.focus == 0)
+	listTitle := fmt.Sprintf("CONTACTS (%d)", len(p.filtered))
+	list := p.theme.Column(listTitle, p.listBody(listW-2, h-3), listW, h, p.focus == 1)
+	detail := p.theme.Column("DETAIL", p.detailBody(detailW-2), detailW, h, p.focus == 2)
+	return lipgloss.JoinHorizontal(lipgloss.Top, books, list, detail)
+}
+
+func (p *contactsPane) booksBody(w int) string {
+	var b strings.Builder
+	for i, col := range p.books {
+		sel := i == p.bookIdx
+		label := fmt.Sprintf("%s %s", IconContacts, col.Name)
+		count := fmt.Sprintf(" %d", len(p.store.Contacts(col.ID)))
+		line := PadRight(Truncate(label, w-lipgloss.Width(count)), w-lipgloss.Width(count)) + count
+		b.WriteString(p.theme.SelectStyle(sel, p.focus == 0).Render(PadRight(line, w)))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func (p *contactsPane) listBody(w, h int) string {
+	if p.searching {
+		// Show the search input on the first line, list below.
+		p.search.Width = w - 2
+	}
+	var lines []string
+	for _, idx := range p.filtered {
+		lines = append(lines, p.contactRow(p.all[idx], w))
+	}
+	visible, top := scrollWindow(lines, p.curIdx, max0(h))
+	var b strings.Builder
+	if p.searching {
+		b.WriteString(p.search.View())
+		b.WriteByte('\n')
+	}
+	for i, line := range visible {
+		idx := top + i
+		b.WriteString(p.theme.SelectStyle(idx == p.curIdx, p.focus == 1 && !p.searching).Render(PadRight(line, w)))
+		b.WriteByte('\n')
+	}
+	if len(lines) == 0 {
+		b.WriteString(p.theme.ItemDim.Render("no contacts"))
+	}
+	return b.String()
+}
+
+func (p *contactsPane) contactRow(c model.Contact, w int) string {
+	return Truncate(fmt.Sprintf("%s %s", IconPerson, c.DisplayName()), w)
+}
+
+func (p *contactsPane) detailBody(w int) string {
+	c, ok := p.selected()
+	if !ok {
+		return p.theme.ItemDim.Render("no selection")
+	}
+	var b strings.Builder
+	b.WriteString(p.theme.Title.Render(Truncate(c.DisplayName(), w)) + "\n")
+	if c.Title != "" || c.Org != "" {
+		sub := strings.TrimSpace(strings.Join([]string{c.Title, c.Org}, " · "))
+		sub = strings.Trim(sub, " ·")
+		b.WriteString(p.theme.Label.Render(Truncate(fmt.Sprintf("%s %s", IconOrg, sub), w)) + "\n")
+	}
+	b.WriteString("\n")
+
+	avatar := IconPerson
+	if len(c.Photo) > 0 {
+		avatar = IconPerson + " [photo]"
+	}
+	b.WriteString(p.theme.ItemDim.Render(avatar) + "\n\n")
+
+	for _, e := range c.Emails {
+		b.WriteString(p.field(IconEmail, e.Value, typeLabel(e.Types), w))
+	}
+	for _, t := range c.Phones {
+		b.WriteString(p.field(IconPhone, t.Value, typeLabel(t.Types), w))
+	}
+	if c.Birthday != nil {
+		b.WriteString(p.field(IconCake, c.Birthday.Format("Jan 2, 2006"), "", w))
+	}
+	if c.Note != "" {
+		b.WriteString("\n" + p.theme.Label.Render(IconNote+" note") + "\n")
+		b.WriteString(p.theme.Value.Render(Truncate(c.Note, w)) + "\n")
+	}
+	return b.String()
+}
+
+func (p *contactsPane) field(icon, value, label string, w int) string {
+	line := fmt.Sprintf("%s %s", icon, value)
+	if label != "" {
+		line += " " + p.theme.Label.Render("("+label+")")
+	}
+	return p.theme.Value.Render(Truncate(line, w)) + "\n"
+}
+
+func typeLabel(types []string) string { return strings.Join(types, "/") }
+
+func contactContains(c model.Contact, q string) bool {
+	if strings.Contains(strings.ToLower(c.FN), q) {
+		return true
+	}
+	for _, e := range c.Emails {
+		if strings.Contains(strings.ToLower(e.Value), q) {
+			return true
+		}
+	}
+	for _, t := range c.Phones {
+		if strings.Contains(strings.ToLower(t.Value), q) {
+			return true
+		}
+	}
+	return false
+}
+
+func max0(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
+}

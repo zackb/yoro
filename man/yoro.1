@@ -1,0 +1,110 @@
+.TH YORO 1 "June 2026" "yoro 0.1.0" "User Commands"
+.SH NAME
+yoro \- a terminal UI for local calendars and contacts
+.SH SYNOPSIS
+.B yoro
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B yoro
+is a terminal user interface for browsing calendars and contacts stored on disk
+in the vdirsyncer/khal layout. It reads iCalendar (\fI.ics\fR) and vCard
+(\fI.vcf\fR) files directly and presents them in a fast, vim-navigated,
+miller-column interface inspired by
+.BR yazi (1).
+.PP
+The interface has two modes \(em Calendar and Contacts \(em that share the same
+navigation. The Calendar mode shows a day-grouped agenda with a mini-month
+navigator and per-collection color toggles; recurring events are expanded on the
+fly. The Contacts mode shows a three-column address book / contact list / detail
+view with live search.
+.PP
+This release is read-only. Editing files and CalDAV/CardDAV synchronization are
+planned.
+.SH OPTIONS
+.TP
+.B \-\-calendars \fIDIR\fR
+Override the calendars directory (default \fI~/.local/share/calendars\fR).
+.TP
+.B \-\-contacts \fIDIR\fR
+Override the contacts directory (default \fI~/.local/share/contacts\fR).
+.TP
+.B \-\-version
+Print the version and exit.
+.SH KEYBINDINGS
+.SS Global
+.TP
+.B tab, 1, 2
+Switch between Calendar and Contacts.
+.TP
+.B R
+Reload all data from disk.
+.TP
+.B ?
+Toggle the help overlay.
+.TP
+.B q, ctrl+c
+Quit.
+.SS Navigation
+.TP
+.B h, l
+Move focus to the column on the left or right.
+.TP
+.B j, k
+Move down or up.
+.TP
+.B gg, G
+Jump to the top or bottom.
+.TP
+.B ctrl+d, ctrl+u
+Half-page down or up.
+.TP
+.B /
+Search within the current pane;
+.B n
+and
+.B N
+move to the next and previous match;
+.B esc
+clears.
+.SS Calendar
+.TP
+.B t
+Jump to today.
+.TP
+.B }, {
+Jump to the next or previous day that has events.
+.TP
+.B J, K
+Move the mini-month to the next or previous month.
+.TP
+.B space
+Toggle the highlighted collection on or off.
+.TP
+.B T
+Toggle visibility of tasks (VTODO).
+.SS Contacts
+.TP
+.B y
+Yank the highlighted email or phone number to the clipboard (via OSC52).
+.SH FILES
+.TP
+.I ~/.local/share/calendars
+Default calendars directory. Each subdirectory containing \fI.ics\fR files is a
+calendar collection; optional \fIdisplayname\fR and \fIcolor\fR sibling files set
+the name and color.
+.TP
+.I ~/.local/share/contacts
+Default contacts directory. Each subdirectory containing \fI.vcf\fR files is an
+address book.
+.SH ENVIRONMENT
+.TP
+.B XDG_DATA_HOME
+Used to locate the default data directories when set.
+.SH SEE ALSO
+.BR yazi (1),
+.BR khal (1),
+.BR vdirsyncer (1)
+.SH AUTHOR
+Written by Zack Bartel <zack@bartel.com>.
+.SH LICENSE
+MIT License.

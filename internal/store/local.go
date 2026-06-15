@@ -1,0 +1,173 @@
+package store
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/zackb/yoro/internal/config"
+	"github.com/zackb/yoro/internal/ical"
+	"github.com/zackb/yoro/internal/model"
+	"github.com/zackb/yoro/internal/vcard"
+)
+
+// Local is a read-only Backend over the vdirsyncer/khal on-disk layout. A
+// collection is any directory that directly contains .ics (calendar) or .vcf
+// (address book) files. Per-collection "displayname" and "color" sibling files
+// are honored.
+type Local struct {
+	cfg config.Config
+}
+
+// NewLocal constructs a filesystem backend.
+func NewLocal(cfg config.Config) *Local { return &Local{cfg: cfg} }
+
+// Local satisfies Backend (not WriteBackend) by design.
+var _ Backend = (*Local)(nil)
+
+func (l *Local) Collections(ctx context.Context) ([]model.Collection, error) {
+	var cols []model.Collection
+	cals, err := discover(l.cfg.CalendarsDir, ".ics", model.KindCalendar)
+	if err != nil {
+		return nil, err
+	}
+	cols = append(cols, cals...)
+	books, err := discover(l.cfg.ContactsDir, ".vcf", model.KindAddressBook)
+	if err != nil {
+		return nil, err
+	}
+	cols = append(cols, books...)
+	return cols, nil
+}
+
+func (l *Local) Events(ctx context.Context, colID string) ([]model.Event, error) {
+	dir := l.dirFor(colID, model.KindCalendar)
+	var events []model.Event
+	err := eachFile(dir, ".ics", func(data []byte) error {
+		f, err := ical.Parse(data, colID)
+		if err != nil {
+			return nil // skip malformed files
+		}
+		events = append(events, f.Events...)
+		return nil
+	})
+	return events, err
+}
+
+func (l *Local) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
+	dir := l.dirFor(colID, model.KindCalendar)
+	var todos []model.Todo
+	err := eachFile(dir, ".ics", func(data []byte) error {
+		f, err := ical.Parse(data, colID)
+		if err != nil {
+			return nil
+		}
+		todos = append(todos, f.Todos...)
+		return nil
+	})
+	return todos, err
+}
+
+func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, error) {
+	dir := l.dirFor(colID, model.KindAddressBook)
+	var contacts []model.Contact
+	err := eachFile(dir, ".vcf", func(data []byte) error {
+		cs, err := vcard.Parse(data, colID)
+		if err != nil {
+			return nil
+		}
+		contacts = append(contacts, cs...)
+		return nil
+	})
+	return contacts, err
+}
+
+// dirFor resolves a collection ID (a path relative to its root) to an absolute
+// directory.
+func (l *Local) dirFor(colID string, kind model.Kind) string {
+	root := l.cfg.CalendarsDir
+	if kind == model.KindAddressBook {
+		root = l.cfg.ContactsDir
+	}
+	return filepath.Join(root, colID)
+}
+
+// discover walks root and returns every directory that directly contains a file
+// with the given extension.
+func discover(root, ext string, kind model.Kind) ([]model.Collection, error) {
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil, nil // missing root is not fatal; just no collections
+	}
+	seen := map[string]bool{}
+	var cols []model.Collection
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() || !strings.EqualFold(filepath.Ext(d.Name()), ext) {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if seen[dir] {
+			return nil
+		}
+		seen[dir] = true
+		id, _ := filepath.Rel(root, dir)
+		cols = append(cols, model.Collection{
+			ID:    id,
+			Name:  collectionName(dir),
+			Color: model.ParseColor(readMeta(dir, "color")),
+			Kind:  kind,
+			Path:  dir,
+		})
+		return nil
+	})
+	sort.Slice(cols, func(i, j int) bool { return cols[i].Name < cols[j].Name })
+	return cols, err
+}
+
+// collectionName prefers the displayname sibling file, then a meaningful
+// directory basename (treating generic "card" as the account name).
+func collectionName(dir string) string {
+	if name := readMeta(dir, "displayname"); name != "" {
+		return name
+	}
+	base := filepath.Base(dir)
+	if base == "card" {
+		return filepath.Base(filepath.Dir(dir))
+	}
+	return base
+}
+
+// readMeta reads a one-line metadata sibling file, trimming whitespace.
+func readMeta(dir, name string) string {
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// eachFile invokes fn with the bytes of every file in dir with the given ext.
+func eachFile(dir, ext string, fn func([]byte) error) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil // empty/missing collection
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ext) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if err := fn(data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
