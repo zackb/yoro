@@ -71,11 +71,12 @@ type Event struct {
 	Attendees []Attendee
 	Alarms    []Alarm
 
-	// Round-trip fidelity for a future write/sync backend.
+	// Round-trip fidelity and write-back locator.
 	Sequence int
 	Rev      string
 	ETag     string
 	Raw      []byte
+	Path     string // source file path (local) or object href (DAV), for updates
 }
 
 // Recurring reports whether the event repeats.
@@ -142,6 +143,7 @@ type Contact struct {
 	Rev  string
 	ETag string
 	Raw  []byte
+	Path string // source file path (local) or object href (DAV), for updates
 }
 
 // DisplayName returns the best available human label: the formatted name, then

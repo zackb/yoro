@@ -152,6 +152,7 @@ func (d *DAV) fetchCalendar(ctx context.Context, colID string) (ical.File, error
 		}
 		for i := range f.Events {
 			f.Events[i].ETag = o.ETag
+			f.Events[i].Path = o.Path
 		}
 		out.Events = append(out.Events, f.Events...)
 		out.Todos = append(out.Todos, f.Todos...)
@@ -181,6 +182,7 @@ func (d *DAV) Contacts(ctx context.Context, colID string) ([]model.Contact, erro
 		}
 		for i := range cs {
 			cs[i].ETag = o.ETag
+			cs[i].Path = o.Path
 		}
 		out = append(out, cs...)
 	}
@@ -206,6 +208,33 @@ func (d *DAV) PutContact(ctx context.Context, colID string, c model.Contact) err
 	}
 	path := objectPath(model.NativeID(d.sourceID, colID), c.UID, ".vcf")
 	_, err := d.card.PutAddressObject(ctx, path, vcard.BuildContact(c))
+	return err
+}
+
+// UpdateEvent mutates the event's original object in place and PUTs it back to
+// its existing href (e.Path), preserving unmodeled properties.
+func (d *DAV) UpdateEvent(ctx context.Context, colID string, e model.Event) error {
+	if d.cal == nil {
+		return fmt.Errorf("dav: source %q has no calendars", d.sourceID)
+	}
+	cal, err := ical.UpdateEvent(e.Raw, e)
+	if err != nil {
+		return err
+	}
+	_, err = d.cal.PutCalendarObject(ctx, e.Path, cal)
+	return err
+}
+
+// UpdateContact mutates the contact's original object in place and PUTs it back.
+func (d *DAV) UpdateContact(ctx context.Context, colID string, c model.Contact) error {
+	if d.card == nil {
+		return fmt.Errorf("dav: source %q has no address books", d.sourceID)
+	}
+	card, err := vcard.UpdateContact(c.Raw, c)
+	if err != nil {
+		return err
+	}
+	_, err = d.card.PutAddressObject(ctx, c.Path, card)
 	return err
 }
 

@@ -2,6 +2,8 @@ package vcard
 
 import (
 	"bytes"
+	"fmt"
+	"time"
 
 	govcard "github.com/emersion/go-vcard"
 
@@ -53,6 +55,42 @@ func typedField(v model.TypedValue) *govcard.Field {
 		f.Params = govcard.Params{govcard.ParamType: append([]string(nil), v.Types...)}
 	}
 	return f
+}
+
+// UpdateContact decodes raw (the contact's original bytes) and mutates it in
+// place from c — preserving the card's version, unmodeled properties, and any
+// additional emails/phones beyond the first. Only the formatted name and the
+// first email/phone are changed; REV is set to now. A blank field is left
+// untouched (not removed). The caller re-encodes (local) or PUTs it (DAV).
+func UpdateContact(raw []byte, c model.Contact) (govcard.Card, error) {
+	card, err := govcard.NewDecoder(bytes.NewReader(raw)).Decode()
+	if err != nil {
+		return nil, err
+	}
+	if c.FN != "" {
+		card.SetValue(govcard.FieldFormattedName, c.FN)
+	}
+	setFirstValue(card, govcard.FieldEmail, c.Emails)
+	setFirstValue(card, govcard.FieldTelephone, c.Phones)
+	card.SetValue(govcard.FieldRevision, time.Now().UTC().Format("20060102T150405Z"))
+	if card.Value(govcard.FieldUID) != c.UID {
+		return nil, fmt.Errorf("vcard: UID mismatch updating %q", c.UID)
+	}
+	return card, nil
+}
+
+// setFirstValue replaces the value of the first field of key, preserving its
+// params (e.g. TYPE), or adds one if none exist. A nil/empty vals leaves any
+// existing fields untouched.
+func setFirstValue(card govcard.Card, key string, vals []model.TypedValue) {
+	if len(vals) == 0 || vals[0].Value == "" {
+		return
+	}
+	if existing := card[key]; len(existing) > 0 {
+		existing[0].Value = vals[0].Value
+		return
+	}
+	card.SetValue(key, vals[0].Value)
 }
 
 // Marshal encodes a card to vCard bytes.

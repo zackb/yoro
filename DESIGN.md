@@ -105,10 +105,36 @@ When editing a value (an email, a NOTE/DESCRIPTION):
    `Reload` the collection. Builders live in `internal/ical/encode.go` and
    `internal/vcard/encode.go` (`BuildEvent`/`BuildContact` + `Marshal`), shared by
    both backends; timed events are written in UTC to avoid a `TZID=Local`.
-2. Editing existing records (load values into the form / vim-modal field edit),
-   bumping `SEQUENCE`/`REV` and using `If-Match` for DAV.
-3. Delete (`dd`) — local file remove, DAV delete. Interface methods are stubbed.
-4. Visual mode for bulk record operations; richer in-field vim motions.
+2. **Done — edit existing records.** `e` opens the same form pre-filled from the
+   selection. Persistence **mutates the item's original `Raw`** (decode → set the
+   edited props on the component whose UID matches → re-encode), so unmodeled
+   properties *and* sibling components in a multi-item file survive; `SEQUENCE`/
+   `REV` are bumped. Each item carries a `Path` locator (local file path / DAV
+   href), captured at read time, so the update overwrites the *same* object
+   instead of a UID-derived path (which would duplicate foreign items).
+   `ical.UpdateEvent`/`vcard.UpdateContact` do the mutation. Recurring events are
+   refused for now.
+3. Editing recurring events (master vs single `RECURRENCE-ID` instance).
+4. Delete (`dd`) — local file remove, DAV delete. Interface methods are stubbed.
+5. Visual mode for bulk record operations; richer in-field vim motions.
+   (`If-Match` conditional PUTs land once go-webdav exposes the option; until then
+   both create and update are last-write-wins.)
+
+### TODO: expand the create/edit form to all modeled fields
+
+The form is deliberately minimal today — events expose Summary/Date/Time/Duration;
+contacts expose Name + first Email + first Phone. This needs to grow to cover the
+rest of the model so edits aren't lossy-by-omission and creates aren't bare:
+
+- **Events:** Location, Description, an all-day toggle, end-time vs duration,
+  later RRULE/attendees/alarms.
+- **Contacts:** multiple Emails/Phones with TYPE labels (home/work/cell), Org,
+  Title, Note, Birthday, structured Name (N) vs FN.
+
+The persistence layer already preserves unmodeled fields on edit (mutate-`Raw`),
+so this is purely a UI/form expansion — likely paired with the eventual vim-modal
+field editing rather than an ever-taller single form. Not urgent, but required
+before the editor is "complete."
 
 ### Note: local collection IDs are namespaced by domain
 

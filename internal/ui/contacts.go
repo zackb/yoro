@@ -308,9 +308,10 @@ func (p *contactsPane) listBody(w, h int) string {
 		// Show the search input on the first line, list below.
 		p.search.Width = w - 2
 	}
+	glyph := p.provenanceGlyph()
 	var lines []string
 	for _, idx := range p.filtered {
-		lines = append(lines, p.contactRow(p.all[idx], w))
+		lines = append(lines, p.contactRow(p.all[idx], glyph, w))
 	}
 	visible, top := scrollWindow(lines, p.curIdx, max0(h))
 	var b strings.Builder
@@ -329,8 +330,19 @@ func (p *contactsPane) listBody(w, h int) string {
 	return b.String()
 }
 
-func (p *contactsPane) contactRow(c model.Contact, w int) string {
-	return Truncate(fmt.Sprintf("%s %s", IconPerson, c.DisplayName()), w)
+func (p *contactsPane) contactRow(c model.Contact, glyph string, w int) string {
+	return Truncate(fmt.Sprintf("%s %s", glyph, c.DisplayName()), w)
+}
+
+// provenanceGlyph returns the cloud (DAV) or disk (local) glyph for the active
+// source. Contacts are browsed one source at a time, so every visible row
+// shares it — yazi-style provenance at a glance. Falls back to a person icon
+// when the source type is unknown.
+func (p *contactsPane) provenanceGlyph() string {
+	if s, ok := p.sourceByID(p.activeSource); ok {
+		return sourceGlyph(s.Type)
+	}
+	return IconPerson
 }
 
 func (p *contactsPane) detailBody(w int) string {

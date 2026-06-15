@@ -18,8 +18,8 @@ miller-column navigation, a live preview pane that follows your cursor, nerd-fon
 and vim keybindings throughout.
 
 > **Status: early.** Yoro browses local *and* CalDAV/CardDAV calendars and contacts, and can
-> **create** new events and contacts (press `a`), persisted to the local file or the DAV server.
-> Editing and deleting existing items are next — see [DESIGN.md](DESIGN.md).
+> **create** (`a`) and **edit** (`e`) events and contacts, persisted to the local file or the
+> DAV server. Deleting items and editing recurring events are next — see [DESIGN.md](DESIGN.md).
 
 ## Features
 
@@ -127,6 +127,7 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `/`            | Search within the current pane                  |
 | `n` / `N`      | Next / previous search match                    |
 | `a`            | Create a new event / contact in the selected collection |
+| `e`            | Edit the selected event / contact (non-recurring) |
 | `R`            | Reload the store from disk                       |
 | `?`            | Toggle help                                     |
 | `q` / `ctrl+c` | Quit                                            |
@@ -164,8 +165,8 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 - [x] Read-only local browsing (Calendar + Contacts) — **Milestone 1**
 - [x] Read-only CalDAV/CardDAV browsing + multi-source provenance
 - [x] Create new events and contacts (local file write + DAV `PUT`)
-- [ ] Editing existing items in place — vim-style modal editing with visual
-  mode; see [DESIGN.md](DESIGN.md)
+- [x] Edit existing events and contacts in place (preserves unmodeled fields)
+- [ ] Editing recurring events (master vs single instance); vim-style modal editing
 - [ ] Deleting items; `If-Match` conditional `PUT`s once go-webdav exposes them
 - [ ] Full month-grid calendar view (toggle)
 

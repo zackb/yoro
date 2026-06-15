@@ -13,6 +13,7 @@ type KeyMap struct {
 	Contacts key.Binding
 	Reload   key.Binding
 	Create   key.Binding
+	Edit     key.Binding
 
 	// Navigation
 	Up       key.Binding
@@ -54,6 +55,7 @@ func DefaultKeyMap() KeyMap {
 		Contacts: key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "contacts")),
 		Reload:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "reload")),
 		Create:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "new item")),
+		Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit item")),
 
 		Up:       key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
 		Down:     key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j", "down")),

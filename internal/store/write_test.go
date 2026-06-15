@@ -3,11 +3,64 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/zackb/yoro/internal/model"
 )
+
+// TestUpdateEventLocalInPlace confirms an update rewrites the SAME file (no
+// duplicate) and is reflected on reload.
+func TestUpdateEventLocalInPlace(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.Calendars()[0].ID
+
+	window := model.DateRange{From: mustTime(t, "2026-06-01T00:00:00Z"), To: mustTime(t, "2026-07-01T00:00:00Z")}
+	var ev model.Event
+	for _, o := range st.Occurrences(window, nil) {
+		if o.Summary == "Standup" {
+			ev = *o.Event
+		}
+	}
+	if ev.UID == "" || ev.Path == "" {
+		t.Fatalf("seed event not found or missing locator: %+v", ev)
+	}
+
+	ev.Summary = "Renamed"
+	if err := st.UpdateEvent(ctx, colID, ev); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+
+	files, _ := os.ReadDir(filepath.Join(cal, "personal"))
+	if len(files) != 1 {
+		t.Fatalf("update should rewrite in place; got %d files", len(files))
+	}
+	if !containsSummary(st.Occurrences(window, nil), "Renamed") {
+		t.Fatal("update not reflected after reload")
+	}
+}
+
+// TestUpdateEventMissingPath rejects an update without a write-back locator.
+func TestUpdateEventMissingPath(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.Calendars()[0].ID
+	err := st.UpdateEvent(ctx, colID, model.Event{UID: "e1", Summary: "x"}) // no Path
+	if err == nil {
+		t.Fatal("expected error updating without Path")
+	}
+}
 
 // TestCreateEventLocal writes a new event through the store into a local source
 // and confirms it is readable back via Occurrences.

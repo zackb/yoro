@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sort"
 	"strings"
@@ -182,6 +183,34 @@ func (s *memStore) CreateContact(ctx context.Context, colID string, c model.Cont
 	}
 	c.CollectionID = colID
 	if err := wb.PutContact(ctx, colID, c); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
+func (s *memStore) UpdateEvent(ctx context.Context, colID string, e model.Event) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if e.UID == "" || e.Path == "" {
+		return fmt.Errorf("store: cannot update event without UID and Path")
+	}
+	if err := wb.UpdateEvent(ctx, colID, e); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
+func (s *memStore) UpdateContact(ctx context.Context, colID string, c model.Contact) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if c.UID == "" || c.Path == "" {
+		return fmt.Errorf("store: cannot update contact without UID and Path")
+	}
+	if err := wb.UpdateContact(ctx, colID, c); err != nil {
 		return err
 	}
 	return s.Reload(ctx, colID)

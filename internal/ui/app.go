@@ -162,6 +162,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Create):
 		a.openCreate()
 		return a, nil
+	case key.Matches(msg, a.keys.Edit):
+		a.openEdit()
+		return a, nil
 	}
 
 	cmd, _ := a.activePane().Update(msg)
@@ -189,14 +192,42 @@ func (a *App) openCreate() {
 	}
 }
 
-// handleCreate routes a key to the open create overlay, persisting on submit.
+// openEdit opens the form pre-filled from the selected item. Recurring events
+// are refused for now (editing the master vs a single instance is a later
+// milestone).
+func (a *App) openEdit() {
+	switch a.mode {
+	case ModeCalendar:
+		occ, ok := a.cal.selectedOcc()
+		if !ok || occ.Event == nil {
+			a.cal.status = "no event selected"
+			return
+		}
+		if occ.Event.Recurring() {
+			a.cal.status = "editing recurring events not supported yet"
+			return
+		}
+		col := a.cal.colByID[occ.CollectionID]
+		a.create = newEditEventForm(a.theme, col, a.sourceName(col.Source), *occ.Event)
+	case ModeContacts:
+		c, ok := a.con.selected()
+		if !ok {
+			a.con.status = "no contact selected"
+			return
+		}
+		col, _ := a.con.selectedBook()
+		a.create = newEditContactForm(a.theme, col, a.sourceName(col.Source), c)
+	}
+}
+
+// handleCreate routes a key to the open create/edit overlay, persisting on submit.
 func (a App) handleCreate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	submitted, cancelled, cmd := a.create.update(msg)
 	switch {
 	case cancelled:
 		a.create = nil
 	case submitted:
-		if err := a.submitCreate(); err != nil {
+		if err := a.submitForm(); err != nil {
 			a.create.err = err.Error()
 		} else {
 			a.create = nil
@@ -205,33 +236,52 @@ func (a App) handleCreate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-// submitCreate builds the model from the form, persists it via the store, and
-// refreshes the affected pane. A returned error is shown in the form.
-func (a App) submitCreate() error {
+// submitForm builds the model from the form, creates or updates it via the
+// store, and refreshes the affected pane. A returned error is shown in the form.
+func (a App) submitForm() error {
 	ctx := context.Background()
+	editing := a.create.editing
+	colID := a.create.target.ID
 	switch a.create.domain {
 	case ModeCalendar:
 		e, err := a.create.buildEvent()
 		if err != nil {
 			return err
 		}
-		if err := a.store.CreateEvent(ctx, a.create.target.ID, e); err != nil {
+		if editing {
+			err = a.store.UpdateEvent(ctx, colID, e)
+		} else {
+			err = a.store.CreateEvent(ctx, colID, e)
+		}
+		if err != nil {
 			return err
 		}
 		a.cal.refresh()
-		a.cal.status = "created event"
+		a.cal.status = verbed(editing, "event")
 	case ModeContacts:
 		c, err := a.create.buildContact()
 		if err != nil {
 			return err
 		}
-		if err := a.store.CreateContact(ctx, a.create.target.ID, c); err != nil {
+		if editing {
+			err = a.store.UpdateContact(ctx, colID, c)
+		} else {
+			err = a.store.CreateContact(ctx, colID, c)
+		}
+		if err != nil {
 			return err
 		}
 		a.con.refresh()
-		a.con.status = "created contact"
+		a.con.status = verbed(editing, "contact")
 	}
 	return nil
+}
+
+func verbed(editing bool, noun string) string {
+	if editing {
+		return "updated " + noun
+	}
+	return "created " + noun
 }
 
 // sourceName resolves a source id to its display name.
@@ -321,6 +371,7 @@ func (a App) helpView() string {
 		section(a.theme, "Global"),
 		row(a.theme, "tab / 1 / 2", "switch calendar / contacts"),
 		row(a.theme, "a", "new event / contact"),
+		row(a.theme, "e", "edit selected event / contact"),
 		row(a.theme, "R", "reload from disk"),
 		row(a.theme, "? ", "toggle this help"),
 		row(a.theme, "q / ctrl+c", "quit"),

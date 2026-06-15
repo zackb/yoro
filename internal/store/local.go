@@ -51,10 +51,13 @@ func (l *Local) Collections(ctx context.Context) ([]model.Collection, error) {
 func (l *Local) Events(ctx context.Context, colID string) ([]model.Event, error) {
 	dir := l.dirFor(colID, model.KindCalendar)
 	var events []model.Event
-	err := eachFile(dir, ".ics", func(data []byte) error {
+	err := eachFile(dir, ".ics", func(path string, data []byte) error {
 		f, err := ical.Parse(data, colID)
 		if err != nil {
 			return nil // skip malformed files
+		}
+		for i := range f.Events {
+			f.Events[i].Path = path
 		}
 		events = append(events, f.Events...)
 		return nil
@@ -65,7 +68,7 @@ func (l *Local) Events(ctx context.Context, colID string) ([]model.Event, error)
 func (l *Local) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
 	dir := l.dirFor(colID, model.KindCalendar)
 	var todos []model.Todo
-	err := eachFile(dir, ".ics", func(data []byte) error {
+	err := eachFile(dir, ".ics", func(path string, data []byte) error {
 		f, err := ical.Parse(data, colID)
 		if err != nil {
 			return nil
@@ -79,10 +82,13 @@ func (l *Local) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
 func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, error) {
 	dir := l.dirFor(colID, model.KindAddressBook)
 	var contacts []model.Contact
-	err := eachFile(dir, ".vcf", func(data []byte) error {
+	err := eachFile(dir, ".vcf", func(path string, data []byte) error {
 		cs, err := vcard.Parse(data, colID)
 		if err != nil {
 			return nil
+		}
+		for i := range cs {
+			cs[i].Path = path
 		}
 		contacts = append(contacts, cs...)
 		return nil
@@ -106,6 +112,33 @@ func (l *Local) PutContact(ctx context.Context, colID string, c model.Contact) e
 		return err
 	}
 	return writeAtomic(l.dirFor(colID, model.KindAddressBook), c.UID+".vcf", data)
+}
+
+// UpdateEvent rewrites the event's original file in place, mutating only the
+// matching VEVENT so unmodeled properties and sibling components survive.
+func (l *Local) UpdateEvent(ctx context.Context, colID string, e model.Event) error {
+	cal, err := ical.UpdateEvent(e.Raw, e)
+	if err != nil {
+		return err
+	}
+	data, err := ical.Marshal(cal)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Dir(e.Path), filepath.Base(e.Path), data)
+}
+
+// UpdateContact rewrites the contact's original file in place.
+func (l *Local) UpdateContact(ctx context.Context, colID string, c model.Contact) error {
+	card, err := vcard.UpdateContact(c.Raw, c)
+	if err != nil {
+		return err
+	}
+	data, err := vcard.Marshal(card)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(filepath.Dir(c.Path), filepath.Base(c.Path), data)
 }
 
 // DeleteEvent and DeleteContact are not yet implemented (create-only milestone).
@@ -226,8 +259,9 @@ func readMeta(dir, name string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// eachFile invokes fn with the bytes of every file in dir with the given ext.
-func eachFile(dir, ext string, fn func([]byte) error) error {
+// eachFile invokes fn with the absolute path and bytes of every file in dir with
+// the given ext. The path lets callers stamp a write-back locator on each item.
+func eachFile(dir, ext string, fn func(path string, data []byte) error) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil // empty/missing collection
@@ -236,11 +270,12 @@ func eachFile(dir, ext string, fn func([]byte) error) error {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ext) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		if err := fn(data); err != nil {
+		if err := fn(path, data); err != nil {
 			return err
 		}
 	}

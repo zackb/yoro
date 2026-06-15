@@ -1,11 +1,94 @@
 package ical
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zackb/yoro/internal/model"
 )
+
+// TestUpdateEventPreservesFidelity confirms editing one event in a multi-event
+// file changes only that event's modeled fields (bumping SEQUENCE) while leaving
+// its unmodeled properties and any sibling component untouched.
+func TestUpdateEventPreservesFidelity(t *testing.T) {
+	const raw = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//other//app//EN
+BEGIN:VEVENT
+UID:keep-1
+DTSTAMP:20260601T000000Z
+DTSTART:20260615T090000Z
+DTEND:20260615T093000Z
+SUMMARY:Keep me
+END:VEVENT
+BEGIN:VEVENT
+UID:edit-1
+DTSTAMP:20260601T000000Z
+DTSTART:20260616T120000Z
+DTEND:20260616T130000Z
+SUMMARY:Old title
+DESCRIPTION:Important notes
+SEQUENCE:2
+X-CUSTOM:hello
+END:VEVENT
+END:VCALENDAR
+`
+	newStart := time.Date(2026, 6, 16, 14, 0, 0, 0, time.UTC)
+	cal, err := UpdateEvent([]byte(raw), model.Event{
+		UID: "edit-1", Summary: "New title", Start: newStart, End: newStart.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := Marshal(cal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "X-CUSTOM:hello") {
+		t.Errorf("unmodeled X- property was dropped:\n%s", data)
+	}
+
+	f, err := Parse(data, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited, kept *model.Event
+	for i := range f.Events {
+		switch f.Events[i].UID {
+		case "edit-1":
+			edited = &f.Events[i]
+		case "keep-1":
+			kept = &f.Events[i]
+		}
+	}
+	if edited == nil || kept == nil {
+		t.Fatalf("want both events back, got %d", len(f.Events))
+	}
+	if edited.Summary != "New title" {
+		t.Errorf("summary: %q", edited.Summary)
+	}
+	if !edited.Start.Equal(newStart) {
+		t.Errorf("start: got %s want %s", edited.Start, newStart)
+	}
+	if edited.Sequence != 3 {
+		t.Errorf("SEQUENCE not bumped: %d", edited.Sequence)
+	}
+	if edited.Description != "Important notes" {
+		t.Errorf("unmodeled DESCRIPTION dropped: %q", edited.Description)
+	}
+	if kept.Summary != "Keep me" {
+		t.Errorf("sibling event clobbered: %q", kept.Summary)
+	}
+}
+
+// TestUpdateEventMissingUID errors rather than corrupting the file.
+func TestUpdateEventMissingUID(t *testing.T) {
+	const raw = "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:a\nDTSTAMP:20260601T000000Z\nDTSTART:20260615T090000Z\nEND:VEVENT\nEND:VCALENDAR\n"
+	if _, err := UpdateEvent([]byte(raw), model.Event{UID: "nope", Summary: "x"}); err == nil {
+		t.Fatal("expected error for missing UID")
+	}
+}
 
 // TestBuildEventRoundTrip confirms a built event marshals to .ics bytes that
 // Parse reads back faithfully, including text escaping and the timed instant.

@@ -33,6 +33,10 @@ type createForm struct {
 	fields []formField
 	focus  int
 	err    string
+
+	editing     bool // edit an existing item vs create a new one
+	origEvent   model.Event
+	origContact model.Contact
 }
 
 func newEventForm(theme Theme, target model.Collection, source string) *createForm {
@@ -54,6 +58,49 @@ func newContactForm(theme Theme, target model.Collection, source string) *create
 		field("name", "Name", ""),
 		field("email", "Email", ""),
 		field("phone", "Phone", ""),
+	}
+	f.fields[0].input.Focus()
+	return f
+}
+
+// newEditEventForm pre-fills the form from an existing event. Times are shown in
+// the local zone; a blank time means all-day.
+func newEditEventForm(theme Theme, target model.Collection, source string, e model.Event) *createForm {
+	f := &createForm{theme: theme, domain: ModeCalendar, target: target, source: source, editing: true, origEvent: e}
+	start := e.Start.Local()
+	timeVal := start.Format("15:04")
+	if e.AllDay {
+		timeVal = ""
+	}
+	dur := int(e.End.Sub(e.Start).Minutes())
+	if dur <= 0 {
+		dur = 60
+	}
+	f.fields = []formField{
+		field("summary", "Summary", e.Summary),
+		field("date", "Date", start.Format("2006-01-02")),
+		field("time", "Time", timeVal),
+		field("duration", "Duration", strconv.Itoa(dur)),
+	}
+	f.fields[0].input.Focus()
+	return f
+}
+
+// newEditContactForm pre-fills the form from an existing contact (name + first
+// email/phone). Other emails/phones and unmodeled fields are preserved on save.
+func newEditContactForm(theme Theme, target model.Collection, source string, c model.Contact) *createForm {
+	f := &createForm{theme: theme, domain: ModeContacts, target: target, source: source, editing: true, origContact: c}
+	email, phone := "", ""
+	if len(c.Emails) > 0 {
+		email = c.Emails[0].Value
+	}
+	if len(c.Phones) > 0 {
+		phone = c.Phones[0].Value
+	}
+	f.fields = []formField{
+		field("name", "Name", c.FN),
+		field("email", "Email", email),
+		field("phone", "Phone", phone),
 	}
 	f.fields[0].input.Focus()
 	return f
@@ -118,23 +165,29 @@ func (f *createForm) buildEvent() (model.Event, error) {
 	if err != nil {
 		return model.Event{}, errors.New("date must be YYYY-MM-DD")
 	}
+	var ev model.Event
 	if f.get("time") == "" {
-		return model.Event{Summary: summary, Start: day, End: day.AddDate(0, 0, 1), AllDay: true}, nil
-	}
-	tod, err := time.ParseInLocation("15:04", f.get("time"), time.Local)
-	if err != nil {
-		return model.Event{}, errors.New("time must be HH:MM")
-	}
-	start := time.Date(day.Year(), day.Month(), day.Day(), tod.Hour(), tod.Minute(), 0, 0, time.Local)
-	dur := 60
-	if d := f.get("duration"); d != "" {
-		n, err := strconv.Atoi(d)
-		if err != nil || n <= 0 {
-			return model.Event{}, errors.New("duration must be a positive number of minutes")
+		ev = model.Event{Summary: summary, Start: day, End: day.AddDate(0, 0, 1), AllDay: true}
+	} else {
+		tod, err := time.ParseInLocation("15:04", f.get("time"), time.Local)
+		if err != nil {
+			return model.Event{}, errors.New("time must be HH:MM")
 		}
-		dur = n
+		start := time.Date(day.Year(), day.Month(), day.Day(), tod.Hour(), tod.Minute(), 0, 0, time.Local)
+		dur := 60
+		if d := f.get("duration"); d != "" {
+			n, err := strconv.Atoi(d)
+			if err != nil || n <= 0 {
+				return model.Event{}, errors.New("duration must be a positive number of minutes")
+			}
+			dur = n
+		}
+		ev = model.Event{Summary: summary, Start: start, End: start.Add(time.Duration(dur) * time.Minute)}
 	}
-	return model.Event{Summary: summary, Start: start, End: start.Add(time.Duration(dur) * time.Minute)}, nil
+	if f.editing {
+		ev.UID, ev.Path, ev.Raw = f.origEvent.UID, f.origEvent.Path, f.origEvent.Raw
+	}
+	return ev, nil
 }
 
 // buildContact parses the contact fields into a new Contact.
@@ -150,14 +203,21 @@ func (f *createForm) buildContact() (model.Contact, error) {
 	if p := f.get("phone"); p != "" {
 		c.Phones = []model.TypedValue{{Value: p}}
 	}
+	if f.editing {
+		c.UID, c.Path, c.Raw = f.origContact.UID, f.origContact.Path, f.origContact.Raw
+	}
 	return c, nil
 }
 
 // view renders the form centered in the given terminal size.
 func (f *createForm) view(width, height int) string {
-	title := "New event"
+	verb := "New"
+	if f.editing {
+		verb = "Edit"
+	}
+	title := verb + " event"
 	if f.domain == ModeContacts {
-		title = "New contact"
+		title = verb + " contact"
 	}
 	header := fmt.Sprintf("%s — %s", title, f.target.Name)
 	if f.source != "" {

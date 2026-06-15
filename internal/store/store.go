@@ -26,8 +26,10 @@ type Backend interface {
 type WriteBackend interface {
 	Backend
 	PutEvent(ctx context.Context, colID string, e model.Event) error
+	UpdateEvent(ctx context.Context, colID string, e model.Event) error
 	DeleteEvent(ctx context.Context, colID, uid string) error
 	PutContact(ctx context.Context, colID string, c model.Contact) error
+	UpdateContact(ctx context.Context, colID string, c model.Contact) error
 	DeleteContact(ctx context.Context, colID, uid string) error
 }
 
@@ -124,4 +126,8 @@ type Store interface {
 	CreateEvent(ctx context.Context, colID string, e model.Event) error
 	// CreateContact persists a new contact into colID and refreshes it.
 	CreateContact(ctx context.Context, colID string, c model.Contact) error
+	// UpdateEvent rewrites an existing event (by UID, at its Path) and refreshes.
+	UpdateEvent(ctx context.Context, colID string, e model.Event) error
+	// UpdateContact rewrites an existing contact (by UID, at its Path).
+	UpdateContact(ctx context.Context, colID string, c model.Contact) error
 }
