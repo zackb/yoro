@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/emersion/go-webdav"
 	"github.com/emersion/go-webdav/caldav"
@@ -39,13 +38,6 @@ type DAV struct {
 	calHome  string
 	card     *carddav.Client
 	cardHome string
-
-	// calCache holds a calendar's freshly fetched+parsed objects so the store's
-	// back-to-back Events()+Todos() calls cost one CalDAV REPORT, not two.
-	// Events() populates it; Todos() consumes it. Entries are one-shot so stale
-	// data is never served if Todos() is called without a preceding Events().
-	mu       sync.Mutex
-	calCache map[string]ical.File
 }
 
 // New connects to endpoint with basic auth and discovers the calendar and
@@ -54,7 +46,7 @@ type DAV struct {
 // only if neither CalDAV nor CardDAV could be reached.
 func New(ctx context.Context, sourceID, endpoint, username, password string) (*DAV, error) {
 	hc := webdav.HTTPClientWithBasicAuth(http.DefaultClient, username, password)
-	d := &DAV{sourceID: sourceID, hc: hc, calCache: map[string]ical.File{}}
+	d := &DAV{sourceID: sourceID, hc: hc}
 	if u, err := url.Parse(endpoint); err == nil {
 		d.base = u.Scheme + "://" + u.Host
 	}
@@ -111,27 +103,28 @@ func (d *DAV) Collections(ctx context.Context) ([]model.Collection, error) {
 	return cols, nil
 }
 
+// CalendarItems fetches and decodes a calendar in a single CalDAV REPORT,
+// returning its events and todos together (the store's preferred entry point).
+func (d *DAV) CalendarItems(ctx context.Context, colID string) ([]model.Event, []model.Todo, error) {
+	f, err := d.fetchCalendar(ctx, colID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f.Events, f.Todos, nil
+}
+
 func (d *DAV) Events(ctx context.Context, colID string) ([]model.Event, error) {
 	f, err := d.fetchCalendar(ctx, colID)
 	if err != nil {
 		return nil, err
 	}
-	d.mu.Lock()
-	d.calCache[colID] = f
-	d.mu.Unlock()
 	return f.Events, nil
 }
 
 func (d *DAV) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
-	d.mu.Lock()
-	f, ok := d.calCache[colID]
-	delete(d.calCache, colID)
-	d.mu.Unlock()
-	if !ok {
-		var err error
-		if f, err = d.fetchCalendar(ctx, colID); err != nil {
-			return nil, err
-		}
+	f, err := d.fetchCalendar(ctx, colID)
+	if err != nil {
+		return nil, err
 	}
 	return f.Todos, nil
 }

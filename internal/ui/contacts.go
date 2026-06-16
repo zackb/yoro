@@ -32,7 +32,7 @@ type contactsPane struct {
 	all      []model.Contact // contacts of the selected book
 	filtered []int           // indices into all (search result / identity)
 	curIdx   int             // index into filtered
-	focus    int             // 0=books, 1=list, 2=detail
+	focus    focusCol
 
 	searching bool
 	search    textinput.Model
@@ -51,7 +51,7 @@ func newContactsPane(theme Theme, keys KeyMap, st store.Store) *contactsPane {
 		keys:   keys,
 		store:  st,
 		search: ti,
-		focus:  1,
+		focus:  focusMiddle,
 		gfx:    newGraphics(),
 	}
 }
@@ -153,11 +153,11 @@ func (p *contactsPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	switch {
 	case key.Matches(km, p.keys.Left):
-		if p.focus > 0 {
+		if p.focus > focusLeft {
 			p.focus--
 		}
 	case key.Matches(km, p.keys.Right):
-		if p.focus < 2 {
+		if p.focus < focusRight {
 			p.focus++
 		}
 	case key.Matches(km, p.keys.Down):
@@ -219,7 +219,7 @@ func (p *contactsPane) updateSearch(msg tea.Msg) (tea.Cmd, bool) {
 
 func (p *contactsPane) startSearch() {
 	p.searching = true
-	p.focus = 1
+	p.focus = focusMiddle
 	p.search.SetValue(p.query)
 	p.search.CursorEnd()
 	p.search.Focus()
@@ -227,7 +227,7 @@ func (p *contactsPane) startSearch() {
 
 func (p *contactsPane) move(d int) { p.moveTo(p.curIdx + d) }
 func (p *contactsPane) moveTo(i int) {
-	if p.focus == 0 {
+	if p.focus == focusLeft {
 		if len(p.books) > 0 {
 			p.bookIdx = clamp(i, 0, len(p.books)-1)
 			p.curIdx = 0
@@ -277,22 +277,16 @@ func (p *contactsPane) listHeight() int { return max0(p.height - 2) }
 // View renders the three columns side by side within w x h.
 func (p *contactsPane) View() string {
 	w, h := p.width, p.height
-	bookW := 22
-	detailW := clamp(w*38/100, 28, 52)
-	listW := w - bookW - detailW
-	if listW < 16 {
-		listW = 16
-		detailW = max0(w - bookW - listW)
-	}
+	bookW, listW, detailW := threeColumns(w, 22, 16, 38, 28, 52)
 
 	booksTitle := "ADDRESS BOOKS"
 	if len(p.sources) > 1 {
 		booksTitle = "BOOKS · " + Truncate(p.activeSourceName(), bookW-10)
 	}
-	books := p.theme.Column(booksTitle, p.booksBody(bookW-2), bookW, h, p.focus == 0)
+	books := p.theme.Column(booksTitle, p.booksBody(bookW-2), bookW, h, p.focus == focusLeft)
 	listTitle := fmt.Sprintf("CONTACTS (%d)", len(p.filtered))
-	list := p.theme.Column(listTitle, p.listBody(listW-2, h-3), listW, h, p.focus == 1)
-	detail := p.theme.Column("DETAIL", p.detailBody(detailW-2), detailW, h, p.focus == 2)
+	list := p.theme.Column(listTitle, p.listBody(listW-2, h-3), listW, h, p.focus == focusMiddle)
+	detail := p.theme.Column("DETAIL", p.detailBody(detailW-2), detailW, h, p.focus == focusRight)
 	return lipgloss.JoinHorizontal(lipgloss.Top, books, list, detail)
 }
 
@@ -303,7 +297,7 @@ func (p *contactsPane) booksBody(w int) string {
 		label := fmt.Sprintf("%s %s", IconContacts, col.Name)
 		count := fmt.Sprintf(" %d", p.counts[col.ID])
 		line := PadRight(Truncate(label, w-lipgloss.Width(count)), w-lipgloss.Width(count)) + count
-		b.WriteString(p.theme.SelectStyle(sel, p.focus == 0).Render(PadRight(line, w)))
+		b.WriteString(p.theme.SelectStyle(sel, p.focus == focusLeft).Render(PadRight(line, w)))
 		b.WriteByte('\n')
 	}
 	return b.String()
@@ -336,7 +330,7 @@ func (p *contactsPane) listBody(w, h int) string {
 	for i, name := range visible {
 		idx := top + i
 		prefix := p.rowPrefix(p.all[p.filtered[idx]], glyph)
-		styled := p.theme.SelectStyle(idx == p.curIdx, p.focus == 1 && !p.searching).
+		styled := p.theme.SelectStyle(idx == p.curIdx, p.focus == focusMiddle && !p.searching).
 			Render(PadRight(Truncate(name, nameW), nameW))
 		b.WriteString(prefix + styled)
 		b.WriteByte('\n')

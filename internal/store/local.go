@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,8 +49,25 @@ func (l *Local) Collections(ctx context.Context) ([]model.Collection, error) {
 }
 
 func (l *Local) Events(ctx context.Context, colID string) ([]model.Event, error) {
+	ev, _, err := l.calendarItems(colID)
+	return ev, err
+}
+
+func (l *Local) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
+	_, td, err := l.calendarItems(colID)
+	return td, err
+}
+
+// CalendarItems parses each .ics file once, returning its events and todos
+// together so a caller that needs both avoids a second pass over the directory.
+func (l *Local) CalendarItems(ctx context.Context, colID string) ([]model.Event, []model.Todo, error) {
+	return l.calendarItems(colID)
+}
+
+func (l *Local) calendarItems(colID string) ([]model.Event, []model.Todo, error) {
 	dir := l.dirFor(colID, model.KindCalendar)
 	var events []model.Event
+	var todos []model.Todo
 	err := eachFile(dir, ".ics", func(path string, data []byte) error {
 		f, err := ical.Parse(data, colID)
 		if err != nil {
@@ -59,23 +77,10 @@ func (l *Local) Events(ctx context.Context, colID string) ([]model.Event, error)
 			f.Events[i].Path = path
 		}
 		events = append(events, f.Events...)
-		return nil
-	})
-	return events, err
-}
-
-func (l *Local) Todos(ctx context.Context, colID string) ([]model.Todo, error) {
-	dir := l.dirFor(colID, model.KindCalendar)
-	var todos []model.Todo
-	err := eachFile(dir, ".ics", func(path string, data []byte) error {
-		f, err := ical.Parse(data, colID)
-		if err != nil {
-			return nil
-		}
 		todos = append(todos, f.Todos...)
 		return nil
 	})
-	return todos, err
+	return events, todos, err
 }
 
 func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, error) {
@@ -97,20 +102,39 @@ func (l *Local) Contacts(ctx context.Context, colID string) ([]model.Contact, er
 
 // PutEvent writes a new or replacement .ics file for the event, named by UID.
 func (l *Local) PutEvent(ctx context.Context, colID string, e model.Event) error {
+	name, err := safeName(e.UID, ".ics")
+	if err != nil {
+		return err
+	}
 	data, err := ical.Marshal(ical.BuildEvent(e))
 	if err != nil {
 		return err
 	}
-	return writeAtomic(l.dirFor(colID, model.KindCalendar), e.UID+".ics", data)
+	return writeAtomic(l.dirFor(colID, model.KindCalendar), name, data)
 }
 
 // PutContact writes a new or replacement .vcf file for the contact, named by UID.
 func (l *Local) PutContact(ctx context.Context, colID string, c model.Contact) error {
+	name, err := safeName(c.UID, ".vcf")
+	if err != nil {
+		return err
+	}
 	data, err := vcard.Marshal(vcard.BuildContact(c))
 	if err != nil {
 		return err
 	}
-	return writeAtomic(l.dirFor(colID, model.KindAddressBook), c.UID+".vcf", data)
+	return writeAtomic(l.dirFor(colID, model.KindAddressBook), name, data)
+}
+
+// safeName builds a "<uid><ext>" filename, rejecting a UID that is not a single
+// path element (empty, "." / "..", or containing a separator) so a crafted UID
+// can't escape the collection directory.
+func safeName(uid, ext string) (string, error) {
+	if uid == "" || uid == "." || uid == ".." ||
+		strings.ContainsAny(uid, `/\`) || filepath.Base(uid) != uid {
+		return "", fmt.Errorf("store: unsafe object id %q", uid)
+	}
+	return uid + ext, nil
 }
 
 // UpdateEvent rewrites the event's original file in place, mutating only the

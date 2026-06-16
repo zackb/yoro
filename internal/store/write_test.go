@@ -228,6 +228,43 @@ func TestCreateReadOnlySource(t *testing.T) {
 	}
 }
 
+// TestSafeName accepts plain UIDs and rejects any that aren't a single path
+// element, so a crafted UID can't escape the collection directory.
+func TestSafeName(t *testing.T) {
+	if got, err := safeName("event-123", ".ics"); err != nil || got != "event-123.ics" {
+		t.Fatalf("safeName(plain) = %q, %v; want event-123.ics, nil", got, err)
+	}
+	for _, bad := range []string{"", ".", "..", "../escape", "a/b", `a\b`, "/abs"} {
+		if _, err := safeName(bad, ".ics"); err == nil {
+			t.Errorf("safeName(%q) = nil error; want rejection", bad)
+		}
+	}
+}
+
+// TestCreateEventRejectsUnsafeUID confirms a create carrying a traversing UID is
+// refused rather than writing a file outside the collection directory.
+func TestCreateEventRejectsUnsafeUID(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.Calendars()[0].ID
+	err := st.CreateEvent(ctx, colID, model.Event{
+		UID:     "../../escape",
+		Summary: "Evil",
+		Start:   mustTime(t, "2026-06-20T15:00:00Z"),
+		End:     mustTime(t, "2026-06-20T16:00:00Z"),
+	})
+	if err == nil {
+		t.Fatal("expected CreateEvent to reject a traversing UID")
+	}
+	if _, statErr := os.Stat(filepath.Join(cal, "escape.ics")); !os.IsNotExist(statErr) {
+		t.Fatalf("a file escaped the collection dir: %v", statErr)
+	}
+}
+
 func containsSummary(occs []model.Occurrence, summary string) bool {
 	for _, o := range occs {
 		if o.Summary == summary {

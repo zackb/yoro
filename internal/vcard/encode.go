@@ -71,22 +71,24 @@ func applyContactFields(card govcard.Card, c model.Contact) {
 	setOrDel(card, govcard.FieldBirthday, formatDate(c.Birthday))
 	setOrDel(card, govcard.FieldAnniversary, formatDate(c.Anniversary))
 
-	delete(card, govcard.FieldEmail)
-	for _, e := range c.Emails {
-		if e.Value != "" {
-			card.Add(govcard.FieldEmail, typedField(e))
-		}
-	}
-	delete(card, govcard.FieldTelephone)
-	for _, p := range c.Phones {
-		if p.Value != "" {
-			card.Add(govcard.FieldTelephone, typedField(p))
-		}
-	}
+	replaceTyped(card, govcard.FieldEmail, c.Emails)
+	replaceTyped(card, govcard.FieldTelephone, c.Phones)
+
 	delete(card, govcard.FieldAddress)
 	for _, a := range c.Addresses {
 		if !a.Empty() {
 			card.AddAddress(buildAddress(a))
+		}
+	}
+}
+
+// replaceTyped clears key, then re-adds one field per non-empty typed value, so
+// the model's list is the card's source of truth.
+func replaceTyped(card govcard.Card, key string, vals []model.TypedValue) {
+	delete(card, key)
+	for _, v := range vals {
+		if v.Value != "" {
+			card.Add(key, typedField(v))
 		}
 	}
 }

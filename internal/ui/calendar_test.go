@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -29,4 +30,16 @@ func TestWrapLinesPreservesBreaksAndWraps(t *testing.T) {
 			t.Errorf("row was truncated with an ellipsis instead of wrapped: %q", l)
 		}
 	}
+}
+
+// TestSyncAnchorOutOfBoundsCursor guards the defensive bounds check: a stale
+// curIdx (left over after a rebuild dropped rows) must not panic syncAnchor.
+func TestSyncAnchorOutOfBoundsCursor(t *testing.T) {
+	p := &calendarPane{
+		focus:   focusMiddle,
+		rows:    []agendaRow{{day: time.Now()}},
+		selRows: []int{0},
+		curIdx:  5, // stale, past the end of selRows
+	}
+	p.syncAnchor() // must not panic
 }

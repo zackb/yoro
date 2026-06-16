@@ -114,27 +114,25 @@ When editing a value (an email, a NOTE/DESCRIPTION):
    instead of a UID-derived path (which would duplicate foreign items).
    `ical.UpdateEvent`/`vcard.UpdateContact` do the mutation. Recurring events are
    refused for now.
-3. Editing recurring events (master vs single `RECURRENCE-ID` instance).
-4. Delete (`dd`) — local file remove, DAV delete. Interface methods are stubbed.
+3. **Done — delete records.** `d` removes the selected item after a `y`/`n`
+   confirmation: local file remove, or DAV delete by href. Recurring events are
+   refused for now. Mutations run async so a slow DAV round-trip never blocks the
+   UI.
+4. Editing/deleting recurring events (master vs single `RECURRENCE-ID` instance).
 5. Visual mode for bulk record operations; richer in-field vim motions.
    (`If-Match` conditional PUTs land once go-webdav exposes the option; until then
-   both create and update are last-write-wins.)
+   create, update, and delete are last-write-wins.)
 
-### TODO: expand the create/edit form to all modeled fields
+### Create/edit form coverage
 
-The form is deliberately minimal today — events expose Summary/Date/Time/Duration;
-contacts expose Name + first Email + first Phone. This needs to grow to cover the
-rest of the model so edits aren't lossy-by-omission and creates aren't bare:
-
-- **Events:** Location, Description, an all-day toggle, end-time vs duration,
-  later RRULE/attendees/alarms.
-- **Contacts:** multiple Emails/Phones with TYPE labels (home/work/cell), Org,
-  Title, Note, Birthday, structured Name (N) vs FN.
-
-The persistence layer already preserves unmodeled fields on edit (mutate-`Raw`),
-so this is purely a UI/form expansion — likely paired with the eventual vim-modal
-field editing rather than an ever-taller single form. Not urgent, but required
-before the editor is "complete."
+The form now covers every field the model carries: events expose Summary, Date,
+Time, Duration, Location, Description, and URL; contacts expose the structured
+Name, multiple Emails/Phones/Addresses with TYPE labels, Org, Title, Role, URL,
+Birthday, Anniversary, and Note. Multi-value rows are added/removed with
+`ctrl+n`/`ctrl+d` and TYPE labels cycled with `ctrl+t`; the form shows its own
+key hints (see `internal/ui/create.go`). Still unmodeled in the form: event RRULE,
+attendees, and alarms — these round-trip losslessly via the mutate-`Raw`
+persistence path, so editing an event that has them does not drop them.
 
 ### Note: local collection IDs are namespaced by domain
 

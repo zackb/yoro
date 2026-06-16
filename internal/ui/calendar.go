@@ -43,7 +43,7 @@ type calendarPane struct {
 	anchor  time.Time // month shown in the mini-month
 
 	showTasks bool
-	focus     int // 0=sidebar, 1=agenda, 2=detail
+	focus     focusCol
 	status    string
 }
 
@@ -56,7 +56,7 @@ func newCalendarPane(theme Theme, keys KeyMap, st store.Store) *calendarPane {
 		enabled: map[string]bool{},
 		anchor:  startOfMonth(now),
 		window:  model.DateRange{From: dayStart(now).AddDate(0, 0, -7), To: dayStart(now).AddDate(0, 0, 56)},
-		focus:   1,
+		focus:   focusMiddle,
 	}
 }
 
@@ -112,11 +112,11 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	switch {
 	case key.Matches(km, p.keys.Left):
-		if p.focus > 0 {
+		if p.focus > focusLeft {
 			p.focus--
 		}
 	case key.Matches(km, p.keys.Right):
-		if p.focus < 2 {
+		if p.focus < focusRight {
 			p.focus++
 		}
 	case key.Matches(km, p.keys.Down):
@@ -160,7 +160,7 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (p *calendarPane) moveDown(n int) {
-	if p.focus == 0 {
+	if p.focus == focusLeft {
 		p.sidebarIdx = clamp(p.sidebarIdx+n, 0, max0(len(p.cals)-1))
 		return
 	}
@@ -171,7 +171,7 @@ func (p *calendarPane) moveDown(n int) {
 }
 
 func (p *calendarPane) moveUp(n int) {
-	if p.focus == 0 {
+	if p.focus == focusLeft {
 		p.sidebarIdx = clamp(p.sidebarIdx-n, 0, max0(len(p.cals)-1))
 		return
 	}
@@ -184,7 +184,7 @@ func (p *calendarPane) moveUp(n int) {
 func (p *calendarPane) cursorTo(i int) { p.curIdx = clamp(i, 0, max0(len(p.selRows)-1)) }
 
 func (p *calendarPane) toggleCollection() {
-	if p.focus != 0 || p.sidebarIdx >= len(p.cals) {
+	if p.focus != focusLeft || p.sidebarIdx >= len(p.cals) {
 		return
 	}
 	id := p.cals[p.sidebarIdx].ID
@@ -255,7 +255,7 @@ func (p *calendarPane) shiftMonth(dir int) {
 
 // syncAnchor keeps the mini-month in step with the cursor's day.
 func (p *calendarPane) syncAnchor() {
-	if p.focus == 0 || len(p.selRows) == 0 {
+	if p.focus == focusLeft || p.curIdx < 0 || p.curIdx >= len(p.selRows) {
 		return
 	}
 	p.anchor = startOfMonth(p.rows[p.selRows[p.curIdx]].day)
@@ -265,7 +265,9 @@ func (p *calendarPane) extendForward() {
 	p.window.To = p.window.To.AddDate(0, 0, 56)
 	cur := p.curIdx
 	p.rebuild()
-	p.curIdx = cur
+	// Forward extension appends rows, so the cursor's row is unchanged; clamp
+	// defensively in case rebuild dropped rows (e.g. a collection toggled off).
+	p.curIdx = clamp(cur, 0, max0(len(p.selRows)-1))
 }
 
 func (p *calendarPane) extendBackward() {
@@ -308,17 +310,11 @@ func (p *calendarPane) selectedOcc() (model.Occurrence, bool) {
 
 func (p *calendarPane) View() string {
 	w, h := p.width, p.height
-	sideW := 26
-	detailW := clamp(w*34/100, 26, 46)
-	agendaW := w - sideW - detailW
-	if agendaW < 18 {
-		agendaW = 18
-		detailW = max0(w - sideW - agendaW)
-	}
+	sideW, agendaW, detailW := threeColumns(w, 26, 18, 34, 26, 46)
 
-	side := p.theme.Column("CALENDARS", p.sidebarBody(sideW-2, h-3), sideW, h, p.focus == 0)
-	agenda := p.theme.Column("AGENDA", p.agendaBody(agendaW-2, h-3), agendaW, h, p.focus == 1)
-	detail := p.theme.Column("EVENT", p.detailBody(detailW-2), detailW, h, p.focus == 2)
+	side := p.theme.Column("CALENDARS", p.sidebarBody(sideW-2, h-3), sideW, h, p.focus == focusLeft)
+	agenda := p.theme.Column("AGENDA", p.agendaBody(agendaW-2, h-3), agendaW, h, p.focus == focusMiddle)
+	detail := p.theme.Column("EVENT", p.detailBody(detailW-2), detailW, h, p.focus == focusRight)
 	return lipgloss.JoinHorizontal(lipgloss.Top, side, agenda, detail)
 }
 
@@ -334,8 +330,8 @@ func (p *calendarPane) sidebarBody(w, h int) string {
 		if p.multiSource {
 			label = fmt.Sprintf("%s %s %s %s", check, sourceGlyph(p.srcType[c.Source]), dot, c.Name)
 		}
-		sel := p.focus == 0 && i == p.sidebarIdx
-		b.WriteString(p.theme.SelectStyle(sel, p.focus == 0).Render(PadRight(Truncate(label, w), w)))
+		sel := p.focus == focusLeft && i == p.sidebarIdx
+		b.WriteString(p.theme.SelectStyle(sel, p.focus == focusLeft).Render(PadRight(Truncate(label, w), w)))
 		b.WriteByte('\n')
 	}
 	b.WriteByte('\n')
@@ -419,7 +415,7 @@ func (p *calendarPane) agendaBody(w, h int) string {
 		if p.rows[rowIdx].header {
 			b.WriteString(line)
 		} else {
-			b.WriteString(p.theme.SelectStyle(isCursor, p.focus == 1).Render(PadRight(line, w)))
+			b.WriteString(p.theme.SelectStyle(isCursor, p.focus == focusMiddle).Render(PadRight(line, w)))
 		}
 		b.WriteByte('\n')
 	}

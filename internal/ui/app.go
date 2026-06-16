@@ -31,10 +31,14 @@ type pane interface {
 	View() string
 	refresh()
 	isSearching() bool
+	setStatus(string)
 }
 
 func (p *calendarPane) isSearching() bool { return false }
 func (p *contactsPane) isSearching() bool { return p.searching }
+
+func (p *calendarPane) setStatus(s string) { p.status = s }
+func (p *contactsPane) setStatus(s string) { p.status = s }
 
 type storeLoadedMsg struct{ err error }
 
@@ -103,11 +107,34 @@ func (a App) load() tea.Msg {
 	return storeLoadedMsg{err: a.store.Load(context.Background())}
 }
 
-func (a App) activePane() pane {
-	if a.mode == ModeContacts {
+func (a App) activePane() pane { return a.paneFor(a.mode) }
+
+// paneFor returns the pane that owns the given domain.
+func (a App) paneFor(m Mode) pane {
+	if m == ModeContacts {
 		return a.con
 	}
 	return a.cal
+}
+
+// setAsyncResult records the outcome of an async mutation on the pane owning the
+// domain: "<failMsg>: <err>" on failure, otherwise a refresh followed by okMsg.
+func (a *App) setAsyncResult(domain Mode, err error, failMsg, okMsg string) {
+	p := a.paneFor(domain)
+	if err != nil {
+		p.setStatus(failMsg + ": " + err.Error())
+		return
+	}
+	p.refresh()
+	p.setStatus(okMsg)
+}
+
+// noun names the item kind a domain operates on, for status messages.
+func (m Mode) noun() string {
+	if m == ModeContacts {
+		return "contact"
+	}
+	return "event"
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -136,42 +163,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deleteDoneMsg:
 		a.busy = false
-		switch msg.domain {
-		case ModeCalendar:
-			if msg.err != nil {
-				a.cal.status = "delete failed: " + msg.err.Error()
-			} else {
-				a.cal.refresh()
-				a.cal.status = "deleted event"
-			}
-		case ModeContacts:
-			if msg.err != nil {
-				a.con.status = "delete failed: " + msg.err.Error()
-			} else {
-				a.con.refresh()
-				a.con.status = "deleted contact"
-			}
-		}
+		a.setAsyncResult(msg.domain, msg.err, "delete failed", "deleted "+msg.domain.noun())
 		return a, nil
 
 	case saveDoneMsg:
 		a.busy = false
-		switch msg.domain {
-		case ModeCalendar:
-			if msg.err != nil {
-				a.cal.status = "save failed: " + msg.err.Error()
-			} else {
-				a.cal.refresh()
-				a.cal.status = verbed(msg.editing, "event")
-			}
-		case ModeContacts:
-			if msg.err != nil {
-				a.con.status = "save failed: " + msg.err.Error()
-			} else {
-				a.con.refresh()
-				a.con.status = verbed(msg.editing, "contact")
-			}
-		}
+		a.setAsyncResult(msg.domain, msg.err, "save failed", verbed(msg.editing, msg.domain.noun()))
 		return a, nil
 
 	case tea.KeyMsg:
@@ -287,7 +284,11 @@ func (a *App) openEdit() {
 			a.con.status = "no contact selected"
 			return
 		}
-		col, _ := a.con.selectedBook()
+		col, ok := a.con.selectedBook()
+		if !ok {
+			a.con.status = "no address book selected"
+			return
+		}
 		a.create = newEditContactForm(a.theme, col, a.sourceName(col.Source), c)
 	}
 }

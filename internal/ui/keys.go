@@ -29,10 +29,8 @@ type KeyMap struct {
 	PageUp   key.Binding
 
 	// Search
-	Search    key.Binding
-	NextMatch key.Binding
-	PrevMatch key.Binding
-	Escape    key.Binding
+	Search key.Binding
+	Escape key.Binding
 
 	// Calendar
 	Today     key.Binding
@@ -72,10 +70,8 @@ func DefaultKeyMap() KeyMap {
 		PageDown: key.NewBinding(key.WithKeys("ctrl+f", "pgdown"), key.WithHelp("ctrl+f", "page down")),
 		PageUp:   key.NewBinding(key.WithKeys("ctrl+b", "pgup"), key.WithHelp("ctrl+b", "page up")),
 
-		Search:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		NextMatch: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
-		PrevMatch: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev match")),
-		Escape:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
+		Search: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		Escape: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
 
 		Today:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "today")),
 		NextDay:   key.NewBinding(key.WithKeys("}"), key.WithHelp("}", "next day")),

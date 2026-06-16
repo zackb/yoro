@@ -213,10 +213,8 @@ func parsePropTime(p *goical.Prop) (time.Time, bool, bool) {
 func dateList(c *goical.Component, name string) []time.Time {
 	var out []time.Time
 	for _, p := range c.Props[name] {
-		loc := loadLocation(p.Params.Get(goical.ParamTimezoneID))
 		for _, raw := range strings.Split(p.Value, ",") {
 			pp := goical.Prop{Value: raw, Params: p.Params}
-			_ = loc
 			if t, _, ok := parsePropTime(&pp); ok {
 				out = append(out, t)
 			}

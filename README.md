@@ -2,7 +2,7 @@
 
 > A blazing-fast, terminal UI for your contacts and calendar.
 
-Yoro is a TUI for browsing (and, soon, editing) calendars and contacts from two kinds of
+Yoro is a TUI for browsing and editing calendars and contacts from two kinds of
 **source**, treated as co-equal first-class citizens:
 
 - **Local vdir trees** in the standard [vdirsyncer](https://vdirsyncer.pimutils.org/)/[khal](https://lostpackets.de/khal/)
@@ -50,7 +50,7 @@ yay -S yoro-git
 
 ### From source
 
-Requires Go 1.24+.
+Requires Go 1.26+.
 
 ```sh
 git clone https://github.com/zackb/yoro
@@ -101,15 +101,14 @@ password_command = "pass icloud/yoro"
 Notes:
 
 - **Source names must be unique** — the name is the source's identity.
-- **`password_command`** is run via the shell and its first line is used as the
-  password (`pass`, `secret-tool`, `op read`, … all work). Prefer it over `password`.
-- **Calendars** from every source are shown together (tagged by source) and overlaid
-  in the agenda. **Contacts** show one source at a time — press `s` to switch — which
-  avoids seeing every person twice when a local vdir mirrors a DAV account.
-- **Split CalDAV/CardDAV hosts (iCloud):** Apple serves calendars and contacts from
-  different hostnames (`caldav.icloud.com` vs `contacts.icloud.com`). Yoro probes both
-  protocols at the `url` you give; if a provider splits them, add two `dav` sources, one
-  per host.
+- **`password_command`** is run via the shell; its first line is the password
+  (`pass`, `secret-tool`, `op read`, …). Prefer it over `password`.
+- **Calendars** from every source are overlaid in the agenda, tagged by source.
+  **Contacts** show one source at a time — press `s` to switch — so a local vdir
+  mirroring a DAV account doesn't show every person twice.
+- **Split hosts (iCloud):** some providers serve calendars and contacts at
+  different hostnames. Yoro probes both protocols at the `url` you give; if a
+  provider splits them, add two `dav` sources, one per host.
 - Yoro does **not** sync sources — see [docs/vdirsyncer.md](docs/vdirsyncer.md).
 
 ### Keybindings
@@ -124,11 +123,10 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `j` / `k`      | Move down / up                                  |
 | `gg` / `G`     | Jump to top / bottom                            |
 | `ctrl+d` / `ctrl+u` | Half-page down / up                        |
-| `ctrl+f` / `ctrl+b` | Page down / up                        |
-| `/`            | Search within the current pane                  |
-| `n` / `N`      | Next / previous search match                    |
+| `ctrl+f` / `ctrl+b` | Page down / up                             |
 | `a`            | Create a new event / contact in the selected collection |
 | `e`            | Edit the selected event / contact (non-recurring) |
+| `d`            | Delete the selected event / contact (non-recurring) |
 | `R`            | Reload the store from disk                       |
 | `?`            | Toggle help                                     |
 | `q` / `ctrl+c` | Quit                                            |
@@ -147,6 +145,7 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 
 | Key | Action                                              |
 | --- | --------------------------------------------------- |
+| `/` | Search contacts (`esc` clears)                      |
 | `y` | Yank the highlighted email/phone to the clipboard   |
 | `s` | Switch the active contacts source (local / DAV)     |
 
@@ -167,8 +166,9 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 - [x] Read-only CalDAV/CardDAV browsing + multi-source provenance
 - [x] Create new events and contacts (local file write + DAV `PUT`)
 - [x] Edit existing events and contacts in place (preserves unmodeled fields)
-- [ ] Editing recurring events (master vs single instance); vim-style modal editing
-- [ ] Deleting items; `If-Match` conditional `PUT`s once go-webdav exposes them
+- [x] Delete events and contacts (local file + DAV)
+- [ ] Editing/deleting recurring events (master vs single instance)
+- [ ] `If-Match` conditional `PUT`s once go-webdav exposes them
 - [ ] Full month-grid calendar view (toggle)
 
 ## License

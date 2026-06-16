@@ -181,3 +181,37 @@ func TestExpandRecurring(t *testing.T) {
 		}
 	}
 }
+
+// TestParseRDateExDateTZID confirms RDATE/EXDATE values honor their TZID
+// parameter (the times are zoned instants, not parsed as local).
+func TestParseRDateExDateTZID(t *testing.T) {
+	const ev = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:rd-1
+SUMMARY:With extras
+DTSTART;TZID=America/Los_Angeles:20260615T090000
+DTEND;TZID=America/Los_Angeles:20260615T093000
+RDATE;TZID=America/Los_Angeles:20260620T090000
+EXDATE;TZID=America/Los_Angeles:20260622T090000
+END:VEVENT
+END:VCALENDAR
+`
+	f, err := Parse([]byte(ev), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := f.Events[0]
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+	wantR := time.Date(2026, 6, 20, 9, 0, 0, 0, la)
+	if len(e.RDates) != 1 || !e.RDates[0].Equal(wantR) {
+		t.Fatalf("RDATE TZID not applied: got %v, want %v", e.RDates, wantR)
+	}
+	wantX := time.Date(2026, 6, 22, 9, 0, 0, 0, la)
+	if len(e.ExDates) != 1 || !e.ExDates[0].Equal(wantX) {
+		t.Fatalf("EXDATE TZID not applied: got %v, want %v", e.ExDates, wantX)
+	}
+}

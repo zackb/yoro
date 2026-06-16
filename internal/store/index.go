@@ -15,6 +15,29 @@ import (
 	"github.com/zackb/yoro/internal/model"
 )
 
+// calendarLoader is an optional Backend optimization: fetch a calendar's events
+// and todos in a single pass, sparing backends a redundant second fetch/parse.
+type calendarLoader interface {
+	CalendarItems(ctx context.Context, colID string) ([]model.Event, []model.Todo, error)
+}
+
+// calendarItems loads a calendar's events and todos, using the backend's
+// single-pass loader when available and falling back to two calls otherwise.
+func calendarItems(ctx context.Context, b Backend, colID string) ([]model.Event, []model.Todo, error) {
+	if cl, ok := b.(calendarLoader); ok {
+		return cl.CalendarItems(ctx, colID)
+	}
+	ev, err := b.Events(ctx, colID)
+	if err != nil {
+		return nil, nil, err
+	}
+	td, err := b.Todos(ctx, colID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ev, td, nil
+}
+
 // memStore is the default in-memory, recurrence-aware Store. It aggregates any
 // number of sources, keying everything by source-namespaced collection ID.
 type memStore struct {
@@ -81,11 +104,10 @@ func (s *memStore) Load(ctx context.Context) error {
 		g.Go(func() error {
 			switch c.Kind {
 			case model.KindCalendar:
-				ev, err := b.Events(gctx, c.ID)
+				ev, td, err := calendarItems(gctx, b, c.ID)
 				if err != nil {
 					return nil
 				}
-				td, _ := b.Todos(gctx, c.ID)
 				mu.Lock()
 				events[c.ID] = ev
 				todos[c.ID] = td
@@ -133,11 +155,7 @@ func (s *memStore) Reload(ctx context.Context, colID string) error {
 	}
 	switch col.Kind {
 	case model.KindCalendar:
-		ev, err := b.Events(ctx, colID)
-		if err != nil {
-			return err
-		}
-		td, err := b.Todos(ctx, colID)
+		ev, td, err := calendarItems(ctx, b, colID)
 		if err != nil {
 			return err
 		}
@@ -328,28 +346,28 @@ func (s *memStore) Search(domain Domain, query string) []Match {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var matches []Match
 	switch domain {
 	case DomainContacts:
-		for _, col := range s.collections {
-			if col.Kind != model.KindAddressBook {
-				continue
-			}
-			for i, c := range s.contacts[col.ID] {
-				if contactMatches(c, q) {
-					matches = append(matches, Match{Domain: domain, Collection: col.ID, Label: c.FN, Index: i})
-				}
-			}
-		}
+		return searchItems(s.collections, model.KindAddressBook, s.contacts, domain,
+			func(c model.Contact) (string, bool) { return c.FN, contactMatches(c, q) })
 	case DomainCalendar:
-		for _, col := range s.collections {
-			if col.Kind != model.KindCalendar {
-				continue
-			}
-			for i, e := range s.events[col.ID] {
-				if strings.Contains(strings.ToLower(e.Summary), q) {
-					matches = append(matches, Match{Domain: domain, Collection: col.ID, Label: e.Summary, Index: i})
-				}
+		return searchItems(s.collections, model.KindCalendar, s.events, domain,
+			func(e model.Event) (string, bool) { return e.Summary, strings.Contains(strings.ToLower(e.Summary), q) })
+	}
+	return nil
+}
+
+// searchItems collects matches across the collections of one kind, labeling each
+// hit and recording its index within that collection's ordered slice.
+func searchItems[T any](cols []model.Collection, kind model.Kind, byCol map[string][]T, domain Domain, match func(T) (string, bool)) []Match {
+	var matches []Match
+	for _, col := range cols {
+		if col.Kind != kind {
+			continue
+		}
+		for i, it := range byCol[col.ID] {
+			if label, ok := match(it); ok {
+				matches = append(matches, Match{Domain: domain, Collection: col.ID, Label: label, Index: i})
 			}
 		}
 	}

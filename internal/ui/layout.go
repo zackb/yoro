@@ -88,9 +88,32 @@ func scrollWindow(lines []string, cursor, height int) ([]string, int) {
 	return lines[top:end], top
 }
 
+// threeColumns splits total width into a fixed-width left column, a flexible
+// middle column, and a right column sized as a clamped percentage of total. The
+// middle column is guaranteed at least midMin; the right column yields width to
+// honor it.
+func threeColumns(total, leftW, midMin, rightPct, rightMin, rightMax int) (left, mid, right int) {
+	right = clamp(total*rightPct/100, rightMin, rightMax)
+	mid = total - leftW - right
+	if mid < midMin {
+		mid = midMin
+		right = max0(total - leftW - mid)
+	}
+	return leftW, mid, right
+}
+
 // oneLine collapses all whitespace (including line breaks) to single spaces, for
 // values shown on a single row (agenda entries, titles).
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// focusCol identifies which column of a three-column pane has keyboard focus.
+type focusCol int
+
+const (
+	focusLeft   focusCol = iota // sidebar / address books
+	focusMiddle                 // agenda / contact list
+	focusRight                  // detail
+)
 
 // clamp constrains v to [lo, hi].
 func clamp(v, lo, hi int) int {
