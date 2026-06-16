@@ -45,6 +45,14 @@ type deleteDoneMsg struct {
 	err    error
 }
 
+// saveDoneMsg reports the result of an async create/edit save, for the same
+// reason as deleteDoneMsg.
+type saveDoneMsg struct {
+	domain  Mode
+	editing bool
+	err     error
+}
+
 // App is the root bubbletea model.
 type App struct {
 	store store.Store
@@ -142,6 +150,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				a.con.refresh()
 				a.con.status = "deleted contact"
+			}
+		}
+		return a, nil
+
+	case saveDoneMsg:
+		a.busy = false
+		switch msg.domain {
+		case ModeCalendar:
+			if msg.err != nil {
+				a.cal.status = "save failed: " + msg.err.Error()
+			} else {
+				a.cal.refresh()
+				a.cal.status = verbed(msg.editing, "event")
+			}
+		case ModeContacts:
+			if msg.err != nil {
+				a.con.status = "save failed: " + msg.err.Error()
+			} else {
+				a.con.refresh()
+				a.con.status = verbed(msg.editing, "contact")
 			}
 		}
 		return a, nil
@@ -345,61 +373,68 @@ func noun(m Mode) string {
 	return "event"
 }
 
-// handleCreate routes a key to the open create/edit overlay, persisting on submit.
+// handleCreate routes a key to the open create/edit overlay. On submit it
+// validates synchronously (so the form stays open to show input errors), then
+// kicks off the actual store write off the UI thread.
 func (a App) handleCreate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	submitted, cancelled, cmd := a.create.update(msg)
 	switch {
 	case cancelled:
 		a.create = nil
 	case submitted:
-		if err := a.submitForm(); err != nil {
+		saveCmd, err := a.buildSaveCmd()
+		if err != nil {
 			a.create.err = err.Error()
-		} else {
-			a.create = nil
+			return a, cmd
 		}
+		domain := a.create.domain
+		a.create = nil
+		a.busy = true
+		a.busyLabel = "saving " + noun(domain)
+		return a, tea.Batch(a.spin.Tick, saveCmd)
 	}
 	return a, cmd
 }
 
-// submitForm builds the model from the form, creates or updates it via the
-// store, and refreshes the affected pane. A returned error is shown in the form.
-func (a App) submitForm() error {
-	ctx := context.Background()
+// buildSaveCmd validates the form into a model and returns a command that
+// persists it (the slow DAV PUT) off the UI thread, reporting via saveDoneMsg. A
+// validation error is returned synchronously so the form can stay open to show it.
+func (a App) buildSaveCmd() (tea.Cmd, error) {
+	st := a.store
 	editing := a.create.editing
+	domain := a.create.domain
 	colID := a.create.target.ID
-	switch a.create.domain {
+	switch domain {
 	case ModeCalendar:
 		e, err := a.create.buildEvent()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if editing {
-			err = a.store.UpdateEvent(ctx, colID, e)
-		} else {
-			err = a.store.CreateEvent(ctx, colID, e)
-		}
-		if err != nil {
-			return err
-		}
-		a.cal.refresh()
-		a.cal.status = verbed(editing, "event")
+		return func() tea.Msg {
+			ctx := context.Background()
+			if editing {
+				err = st.UpdateEvent(ctx, colID, e)
+			} else {
+				err = st.CreateEvent(ctx, colID, e)
+			}
+			return saveDoneMsg{domain: domain, editing: editing, err: err}
+		}, nil
 	case ModeContacts:
 		c, err := a.create.buildContact()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if editing {
-			err = a.store.UpdateContact(ctx, colID, c)
-		} else {
-			err = a.store.CreateContact(ctx, colID, c)
-		}
-		if err != nil {
-			return err
-		}
-		a.con.refresh()
-		a.con.status = verbed(editing, "contact")
+		return func() tea.Msg {
+			ctx := context.Background()
+			if editing {
+				err = st.UpdateContact(ctx, colID, c)
+			} else {
+				err = st.CreateContact(ctx, colID, c)
+			}
+			return saveDoneMsg{domain: domain, editing: editing, err: err}
+		}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func verbed(editing bool, noun string) string {
