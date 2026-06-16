@@ -54,7 +54,8 @@ type App struct {
 	loadErr error
 	spin    spinner.Model
 
-	create   *createForm // non-nil while the create overlay is open
+	create   *createForm    // non-nil while the create overlay is open
+	confirm  *confirmPrompt // non-nil while the delete confirmation is open
 	showHelp bool
 	status   string
 }
@@ -128,6 +129,11 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleCreate(msg)
 	}
 
+	// The delete confirmation is modal: it captures all keys until answered.
+	if a.confirm != nil {
+		return a.handleConfirm(msg)
+	}
+
 	// When a pane owns text input (search), route everything to it first.
 	if a.activePane().isSearching() {
 		cmd, _ := a.activePane().Update(msg)
@@ -164,6 +170,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case key.Matches(msg, a.keys.Edit):
 		a.openEdit()
+		return a, nil
+	case key.Matches(msg, a.keys.Delete):
+		a.openDelete()
 		return a, nil
 	}
 
@@ -217,6 +226,83 @@ func (a *App) openEdit() {
 		}
 		col, _ := a.con.selectedBook()
 		a.create = newEditContactForm(a.theme, col, a.sourceName(col.Source), c)
+	}
+}
+
+// openDelete opens the confirmation overlay for the selected item. Recurring
+// events are refused for now (deleting the master vs a single instance is a
+// later milestone), mirroring openEdit.
+func (a *App) openDelete() {
+	switch a.mode {
+	case ModeCalendar:
+		occ, ok := a.cal.selectedOcc()
+		if !ok || occ.Event == nil {
+			a.cal.status = "no event selected"
+			return
+		}
+		if occ.Event.Recurring() {
+			a.cal.status = "deleting recurring events not supported yet"
+			return
+		}
+		a.confirm = &confirmPrompt{
+			theme:   a.theme,
+			title:   "Delete event",
+			message: "Delete “" + occ.Summary + "”?",
+			domain:  ModeCalendar,
+			colID:   occ.CollectionID,
+			path:    occ.Event.Path,
+		}
+	case ModeContacts:
+		c, ok := a.con.selected()
+		if !ok {
+			a.con.status = "no contact selected"
+			return
+		}
+		col, _ := a.con.selectedBook()
+		a.confirm = &confirmPrompt{
+			theme:   a.theme,
+			title:   "Delete contact",
+			message: "Delete “" + c.DisplayName() + "”?",
+			domain:  ModeContacts,
+			colID:   col.ID,
+			path:    c.Path,
+		}
+	}
+}
+
+// handleConfirm routes a key to the open delete confirmation, performing the
+// deletion on y and dismissing on n/esc.
+func (a App) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		a.performDelete()
+		a.confirm = nil
+	case "n", "N", "esc", "q":
+		a.confirm = nil
+	}
+	return a, nil
+}
+
+// performDelete removes the confirmed item via the store and refreshes the pane,
+// reporting success or failure in the pane status line.
+func (a *App) performDelete() {
+	ctx := context.Background()
+	c := a.confirm
+	switch c.domain {
+	case ModeCalendar:
+		if err := a.store.DeleteEvent(ctx, c.colID, c.path); err != nil {
+			a.cal.status = "delete failed: " + err.Error()
+			return
+		}
+		a.cal.refresh()
+		a.cal.status = "deleted event"
+	case ModeContacts:
+		if err := a.store.DeleteContact(ctx, c.colID, c.path); err != nil {
+			a.con.status = "delete failed: " + err.Error()
+			return
+		}
+		a.con.refresh()
+		a.con.status = "deleted contact"
 	}
 }
 
@@ -320,6 +406,9 @@ func (a App) View() string {
 	if a.create != nil {
 		return a.create.view(a.width, a.height)
 	}
+	if a.confirm != nil {
+		return a.confirm.view(a.width, a.height)
+	}
 	if a.showHelp {
 		return a.helpView()
 	}
@@ -372,6 +461,7 @@ func (a App) helpView() string {
 		row(a.theme, "tab / 1 / 2", "switch calendar / contacts"),
 		row(a.theme, "a", "new event / contact"),
 		row(a.theme, "e", "edit selected event / contact"),
+		row(a.theme, "d", "delete selected event / contact"),
 		row(a.theme, "R", "reload from disk"),
 		row(a.theme, "? ", "toggle this help"),
 		row(a.theme, "q / ctrl+c", "quit"),

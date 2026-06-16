@@ -216,6 +216,34 @@ func (s *memStore) UpdateContact(ctx context.Context, colID string, c model.Cont
 	return s.Reload(ctx, colID)
 }
 
+func (s *memStore) DeleteEvent(ctx context.Context, colID, path string) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return fmt.Errorf("store: cannot delete event without Path")
+	}
+	if err := wb.DeleteEvent(ctx, colID, path); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
+func (s *memStore) DeleteContact(ctx context.Context, colID, path string) error {
+	wb, err := s.writeBackendFor(colID)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return fmt.Errorf("store: cannot delete contact without Path")
+	}
+	if err := wb.DeleteContact(ctx, colID, path); err != nil {
+		return err
+	}
+	return s.Reload(ctx, colID)
+}
+
 // writeBackendFor returns the writable backend owning colID, or ErrReadOnly if
 // the collection is unknown or its source can't be written.
 func (s *memStore) writeBackendFor(colID string) (WriteBackend, error) {

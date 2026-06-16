@@ -118,6 +118,98 @@ func TestCreateContactLocal(t *testing.T) {
 	}
 }
 
+// TestDeleteEventLocal creates an event, deletes it by its path, and confirms
+// the file is gone and the occurrence no longer appears after reload.
+func TestDeleteEventLocal(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.Calendars()[0].ID
+	window := model.DateRange{From: mustTime(t, "2026-06-01T00:00:00Z"), To: mustTime(t, "2026-07-01T00:00:00Z")}
+
+	if err := st.CreateEvent(ctx, colID, model.Event{
+		Summary: "Doomed",
+		Start:   mustTime(t, "2026-06-20T15:00:00Z"),
+		End:     mustTime(t, "2026-06-20T16:00:00Z"),
+	}); err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+
+	var path string
+	for _, o := range st.Occurrences(window, nil) {
+		if o.Summary == "Doomed" {
+			path = o.Event.Path
+		}
+	}
+	if path == "" {
+		t.Fatal("created event missing path")
+	}
+
+	if err := st.DeleteEvent(ctx, colID, path); err != nil {
+		t.Fatalf("DeleteEvent: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file should be removed; stat err = %v", err)
+	}
+	if containsSummary(st.Occurrences(window, nil), "Doomed") {
+		t.Fatal("deleted event still present after reload")
+	}
+}
+
+// TestDeleteContactLocal creates a contact, deletes it by path, and confirms it
+// is gone after reload.
+func TestDeleteContactLocal(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.AddressBooks()[0].ID
+
+	if err := st.CreateContact(ctx, colID, model.Contact{FN: "Katherine Johnson"}); err != nil {
+		t.Fatalf("CreateContact: %v", err)
+	}
+	var path string
+	for _, c := range st.Contacts(colID) {
+		if c.FN == "Katherine Johnson" {
+			path = c.Path
+		}
+	}
+	if path == "" {
+		t.Fatal("created contact missing path")
+	}
+
+	if err := st.DeleteContact(ctx, colID, path); err != nil {
+		t.Fatalf("DeleteContact: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file should be removed; stat err = %v", err)
+	}
+	for _, c := range st.Contacts(colID) {
+		if c.FN == "Katherine Johnson" {
+			t.Fatal("deleted contact still present after reload")
+		}
+	}
+}
+
+// TestDeleteMissingPath rejects a delete without a write-back locator.
+func TestDeleteMissingPath(t *testing.T) {
+	cal, con := writeSource(t, t.TempDir(), "personal")
+	st := New(LocalSource("local", "Local", cal, con))
+	ctx := context.Background()
+	if err := st.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	colID := st.Calendars()[0].ID
+	if err := st.DeleteEvent(ctx, colID, ""); err == nil {
+		t.Fatal("expected error deleting without Path")
+	}
+}
+
 // TestCreateReadOnlySource confirms a create against a source whose backend does
 // not implement WriteBackend returns ErrReadOnly.
 func TestCreateReadOnlySource(t *testing.T) {

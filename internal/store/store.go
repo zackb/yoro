@@ -27,10 +27,10 @@ type WriteBackend interface {
 	Backend
 	PutEvent(ctx context.Context, colID string, e model.Event) error
 	UpdateEvent(ctx context.Context, colID string, e model.Event) error
-	DeleteEvent(ctx context.Context, colID, uid string) error
+	DeleteEvent(ctx context.Context, colID, path string) error
 	PutContact(ctx context.Context, colID string, c model.Contact) error
 	UpdateContact(ctx context.Context, colID string, c model.Contact) error
-	DeleteContact(ctx context.Context, colID, uid string) error
+	DeleteContact(ctx context.Context, colID, path string) error
 }
 
 // Source kinds, mirroring config source types, used for provenance display.
@@ -130,4 +130,8 @@ type Store interface {
 	UpdateEvent(ctx context.Context, colID string, e model.Event) error
 	// UpdateContact rewrites an existing contact (by UID, at its Path).
 	UpdateContact(ctx context.Context, colID string, c model.Contact) error
+	// DeleteEvent removes an existing event (at its Path) and refreshes colID.
+	DeleteEvent(ctx context.Context, colID, path string) error
+	// DeleteContact removes an existing contact (at its Path) and refreshes colID.
+	DeleteContact(ctx context.Context, colID, path string) error
 }

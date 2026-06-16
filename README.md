@@ -18,8 +18,8 @@ miller-column navigation, a live preview pane that follows your cursor, nerd-fon
 and vim keybindings throughout.
 
 > **Status: early.** Yoro browses local *and* CalDAV/CardDAV calendars and contacts, and can
-> **create** (`a`) and **edit** (`e`) events and contacts, persisted to the local file or the
-> DAV server. Deleting items and editing recurring events are next — see [DESIGN.md](DESIGN.md).
+> **create** (`a`), **edit** (`e`), and **delete** (`d`) events and contacts, persisted to the
+> local file or the DAV server. Editing recurring events is next — see [DESIGN.md](DESIGN.md).
 
 ## Features
 

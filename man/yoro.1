@@ -22,10 +22,10 @@ navigator and per-collection color toggles; recurring events are expanded on the
 fly. The Contacts mode shows a three-column address book / contact list / detail
 view with live search.
 .PP
-Events and contacts can be created (\fBa\fR) and edited (\fBe\fR); changes are
-persisted to the owning source \(em a local file or a DAV \fBPUT\fR \(em and
-editing preserves properties Yoro does not model. Deleting items and editing
-recurring events are planned.
+Events and contacts can be created (\fBa\fR), edited (\fBe\fR), and deleted
+(\fBd\fR); changes are persisted to the owning source \(em a local file or a DAV
+\fBPUT\fR/\fBDELETE\fR \(em and editing preserves properties Yoro does not
+model. Editing and deleting recurring events are planned.
 .SH OPTIONS
 .TP
 .B \-\-calendars \fIDIR\fR
@@ -49,6 +49,10 @@ Create a new event (calendar) or contact (contacts) in the selected collection.
 .TP
 .B e
 Edit the selected event or contact (non-recurring events only for now).
+.TP
+.B d
+Delete the selected event or contact, after a \fBy\fR/\fBn\fR confirmation
+(non-recurring events only for now).
 .TP
 .B R
 Reload all data from disk.

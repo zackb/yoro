@@ -319,16 +319,20 @@ func (d *DAV) UpdateContact(ctx context.Context, colID string, c model.Contact) 
 	return err
 }
 
-// DeleteEvent and DeleteContact are not yet implemented (create-only milestone).
-func (d *DAV) DeleteEvent(ctx context.Context, colID, uid string) error {
-	return errNotImplemented
+// DeleteEvent and DeleteContact remove the object at its existing href (path).
+func (d *DAV) DeleteEvent(ctx context.Context, colID, path string) error {
+	if d.cal == nil {
+		return fmt.Errorf("dav: source %q has no calendars", d.sourceID)
+	}
+	return d.cal.RemoveAll(ctx, path)
 }
 
-func (d *DAV) DeleteContact(ctx context.Context, colID, uid string) error {
-	return errNotImplemented
+func (d *DAV) DeleteContact(ctx context.Context, colID, path string) error {
+	if d.card == nil {
+		return fmt.Errorf("dav: source %q has no address books", d.sourceID)
+	}
+	return d.card.RemoveAll(ctx, path)
 }
-
-var errNotImplemented = fmt.Errorf("dav: delete not implemented")
 
 // objectPath joins a collection href and a UID-derived filename into the object
 // href used for PUT, tolerating a missing trailing slash on the collection.

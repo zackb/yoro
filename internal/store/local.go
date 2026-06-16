@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -141,16 +140,15 @@ func (l *Local) UpdateContact(ctx context.Context, colID string, c model.Contact
 	return writeAtomic(filepath.Dir(c.Path), filepath.Base(c.Path), data)
 }
 
-// DeleteEvent and DeleteContact are not yet implemented (create-only milestone).
-func (l *Local) DeleteEvent(ctx context.Context, colID, uid string) error {
-	return errNotImplemented
+// DeleteEvent and DeleteContact remove the item's file in place, located by its
+// write-back path.
+func (l *Local) DeleteEvent(ctx context.Context, colID, path string) error {
+	return os.Remove(path)
 }
 
-func (l *Local) DeleteContact(ctx context.Context, colID, uid string) error {
-	return errNotImplemented
+func (l *Local) DeleteContact(ctx context.Context, colID, path string) error {
+	return os.Remove(path)
 }
-
-var errNotImplemented = errors.New("local: delete not implemented")
 
 // writeAtomic writes data to name within dir via a temp file + rename, so a
 // reader never observes a half-written file. The collection dir is created if
