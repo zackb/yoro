@@ -63,20 +63,17 @@ func UpdateEvent(raw []byte, e model.Event) (*goical.Calendar, error) {
 	return cal, nil
 }
 
-// applyEventProps sets the editable VEVENT properties from e. Empty optional
-// fields (location, description) are left untouched so an update preserves
-// values the form doesn't expose. Timed starts are written in UTC; all-day uses
-// bare DATE values.
+// applyEventProps sets the editable VEVENT properties from e. The form owns
+// these fields, so a blank value clears the property (on update) rather than
+// preserving the prior one; unmodeled properties are left untouched. Timed
+// starts are written in UTC; all-day uses bare DATE values.
 func applyEventProps(props goical.Props, e model.Event) {
 	if e.Summary != "" {
 		props.SetText(goical.PropSummary, e.Summary)
 	}
-	if e.Location != "" {
-		props.SetText(goical.PropLocation, e.Location)
-	}
-	if e.Description != "" {
-		props.SetText(goical.PropDescription, e.Description)
-	}
+	setOrDel(props, goical.PropLocation, e.Location)
+	setOrDel(props, goical.PropDescription, e.Description)
+	setOrDel(props, goical.PropURL, e.URL)
 	if e.AllDay {
 		props.SetDate(goical.PropDateTimeStart, e.Start)
 		props.SetDate(goical.PropDateTimeEnd, e.End)
@@ -84,6 +81,16 @@ func applyEventProps(props goical.Props, e model.Event) {
 		props.SetDateTime(goical.PropDateTimeStart, e.Start.UTC())
 		props.SetDateTime(goical.PropDateTimeEnd, e.End.UTC())
 	}
+}
+
+// setOrDel writes a TEXT property when val is non-empty, or removes it when
+// blank, so the form is the source of truth for the fields it exposes.
+func setOrDel(props goical.Props, name, val string) {
+	if val == "" {
+		delete(props, name)
+		return
+	}
+	props.SetText(name, val)
 }
 
 // Marshal encodes a calendar to iCalendar bytes.

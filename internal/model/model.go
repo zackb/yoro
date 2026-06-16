@@ -58,6 +58,7 @@ type Event struct {
 	Summary      string
 	Description  string
 	Location     string
+	URL          string
 	Start        time.Time
 	End          time.Time
 	AllDay       bool
@@ -132,11 +133,16 @@ type Contact struct {
 	CollectionID string
 	FN           string // formatted name (preferred display)
 	Name         StructuredName
+	Nickname     string
 	Emails       []TypedValue
 	Phones       []TypedValue
+	Addresses    []Address
 	Org          string
 	Title        string
+	Role         string
+	URL          string
 	Birthday     *time.Time
+	Anniversary  *time.Time
 	Note         string
 	Photo        []byte // decoded PHOTO bytes when embedded; nil for URI-only
 
@@ -184,4 +190,23 @@ type StructuredName struct {
 type TypedValue struct {
 	Value string
 	Types []string
+}
+
+// Address is the components of a vCard ADR property, with its type labels.
+// Component order mirrors go-vcard's Address (and the ADR value order).
+type Address struct {
+	Types      []string // home/work/...
+	POBox      string
+	Extended   string // e.g. apartment or suite number
+	Street     string
+	Locality   string // city
+	Region     string // state or province
+	PostalCode string
+	Country    string
+}
+
+// Empty reports whether the address has no component values.
+func (a Address) Empty() bool {
+	return a.POBox == "" && a.Extended == "" && a.Street == "" && a.Locality == "" &&
+		a.Region == "" && a.PostalCode == "" && a.Country == ""
 }

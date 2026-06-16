@@ -37,6 +37,7 @@ END:VCALENDAR
 	newStart := time.Date(2026, 6, 16, 14, 0, 0, 0, time.UTC)
 	cal, err := UpdateEvent([]byte(raw), model.Event{
 		UID: "edit-1", Summary: "New title", Start: newStart, End: newStart.Add(time.Hour),
+		Description: "Revised notes", URL: "https://example.com/e",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -74,11 +75,50 @@ END:VCALENDAR
 	if edited.Sequence != 3 {
 		t.Errorf("SEQUENCE not bumped: %d", edited.Sequence)
 	}
-	if edited.Description != "Important notes" {
-		t.Errorf("unmodeled DESCRIPTION dropped: %q", edited.Description)
+	if edited.Description != "Revised notes" {
+		t.Errorf("form-owned DESCRIPTION not updated: %q", edited.Description)
+	}
+	if edited.URL != "https://example.com/e" {
+		t.Errorf("URL not written: %q", edited.URL)
 	}
 	if kept.Summary != "Keep me" {
 		t.Errorf("sibling event clobbered: %q", kept.Summary)
+	}
+}
+
+// TestUpdateEventClearsBlankFields confirms the form now owns Location/
+// Description/URL: a blank value removes the property rather than preserving it.
+func TestUpdateEventClearsBlankFields(t *testing.T) {
+	const raw = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//other//app//EN
+BEGIN:VEVENT
+UID:edit-1
+DTSTAMP:20260601T000000Z
+DTSTART:20260616T120000Z
+DTEND:20260616T130000Z
+SUMMARY:Title
+LOCATION:Old room
+DESCRIPTION:Old notes
+URL:https://old.example
+END:VEVENT
+END:VCALENDAR
+`
+	start := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	cal, err := UpdateEvent([]byte(raw), model.Event{
+		UID: "edit-1", Summary: "Title", Start: start, End: start.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := Marshal(cal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prop := range []string{"LOCATION", "DESCRIPTION", "URL"} {
+		if strings.Contains(string(data), prop+":") {
+			t.Errorf("blank %s not cleared:\n%s", prop, data)
+		}
 	}
 }
 

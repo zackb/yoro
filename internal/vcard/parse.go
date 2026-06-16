@@ -36,8 +36,11 @@ func parseCard(card govcard.Card, collectionID string, raw []byte) model.Contact
 		CollectionID: collectionID,
 		UID:          card.Value(govcard.FieldUID),
 		FN:           card.PreferredValue(govcard.FieldFormattedName),
+		Nickname:     card.Value(govcard.FieldNickname),
 		Org:          card.Value(govcard.FieldOrganization),
 		Title:        card.Value(govcard.FieldTitle),
+		Role:         card.Value(govcard.FieldRole),
+		URL:          card.PreferredValue(govcard.FieldURL),
 		Note:         card.Value(govcard.FieldNote),
 		Rev:          card.Value("REV"),
 		Raw:          raw,
@@ -56,14 +59,46 @@ func parseCard(card govcard.Card, collectionID string, raw []byte) model.Contact
 	}
 	c.Emails = typedValues(card[govcard.FieldEmail])
 	c.Phones = typedValues(card[govcard.FieldTelephone])
+	c.Addresses = parseAddresses(card.Addresses())
 
 	if b := card.Value(govcard.FieldBirthday); b != "" {
 		if t, ok := parseDate(b); ok {
 			c.Birthday = &t
 		}
 	}
+	if a := card.Value(govcard.FieldAnniversary); a != "" {
+		if t, ok := parseDate(a); ok {
+			c.Anniversary = &t
+		}
+	}
 	c.Photo = decodePhoto(card.Get(govcard.FieldPhoto))
 	return c
+}
+
+func parseAddresses(addrs []*govcard.Address) []model.Address {
+	var out []model.Address
+	for _, a := range addrs {
+		if a == nil {
+			continue
+		}
+		ma := model.Address{
+			POBox:      a.PostOfficeBox,
+			Extended:   a.ExtendedAddress,
+			Street:     a.StreetAddress,
+			Locality:   a.Locality,
+			Region:     a.Region,
+			PostalCode: a.PostalCode,
+			Country:    a.Country,
+		}
+		if a.Field != nil {
+			ma.Types = normalizeTypes(a.Params.Types())
+		}
+		if ma.Empty() {
+			continue
+		}
+		out = append(out, ma)
+	}
+	return out
 }
 
 func typedValues(fields []*govcard.Field) []model.TypedValue {

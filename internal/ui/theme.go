@@ -23,6 +23,8 @@ const (
 	IconCake     = "\U000F00EB" // nf-md-cake_variant
 	IconOrg      = "\U000F0991" // nf-md-office_building
 	IconNote     = "\U000F039E" // nf-md-note_text
+	IconLink     = "\U000F0339" // nf-md-link_variant
+	IconHeart    = "\U000F02D1" // nf-md-heart
 	IconDot      = "●"
 	IconCheckOn  = "\U000F0132" // nf-md-checkbox_marked
 	IconCheckOff = "\U000F0131" // nf-md-checkbox_blank_outline

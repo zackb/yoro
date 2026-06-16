@@ -376,10 +376,11 @@ func (p *contactsPane) detailBody(w int) string {
 	}
 	var b strings.Builder
 	b.WriteString(p.theme.Title.Render(Truncate(c.DisplayName(), w)) + "\n")
-	if c.Title != "" || c.Org != "" {
-		sub := strings.TrimSpace(strings.Join([]string{c.Title, c.Org}, " · "))
-		sub = strings.Trim(sub, " ·")
+	if sub := joinNonEmpty(" · ", c.Title, c.Role, c.Org); sub != "" {
 		b.WriteString(p.theme.Label.Render(Truncate(fmt.Sprintf("%s %s", IconOrg, sub), w)) + "\n")
+	}
+	if c.Nickname != "" {
+		b.WriteString(p.theme.Label.Render(Truncate(fmt.Sprintf("%s “%s”", IconPerson, c.Nickname), w)) + "\n")
 	}
 	b.WriteString("\n")
 
@@ -399,8 +400,19 @@ func (p *contactsPane) detailBody(w int) string {
 	for _, t := range c.Phones {
 		b.WriteString(p.field(IconPhone, t.Value, typeLabel(t.Types), w))
 	}
+	if c.URL != "" {
+		b.WriteString(p.field(IconLink, c.URL, "", w))
+	}
+	for _, a := range c.Addresses {
+		if s := formatAddress(a); s != "" {
+			b.WriteString(p.field(IconLocation, s, typeLabel(a.Types), w))
+		}
+	}
 	if c.Birthday != nil {
 		b.WriteString(p.field(IconCake, c.Birthday.Format("Jan 2, 2006"), "", w))
+	}
+	if c.Anniversary != nil {
+		b.WriteString(p.field(IconHeart, c.Anniversary.Format("Jan 2, 2006"), "anniversary", w))
 	}
 	if c.Note != "" {
 		b.WriteString("\n" + p.theme.Label.Render(IconNote+" note") + "\n")
@@ -418,6 +430,22 @@ func (p *contactsPane) field(icon, value, label string, w int) string {
 }
 
 func typeLabel(types []string) string { return strings.Join(types, "/") }
+
+// joinNonEmpty joins the non-empty, trimmed parts with sep.
+func joinNonEmpty(sep string, parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+// formatAddress renders an address as a single comma-separated line.
+func formatAddress(a model.Address) string {
+	return joinNonEmpty(", ", a.Street, a.Locality, a.Region, a.PostalCode, a.Country)
+}
 
 func contactContains(c model.Contact, q string) bool {
 	if strings.Contains(strings.ToLower(c.FN), q) {

@@ -124,6 +124,7 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `j` / `k`      | Move down / up                                  |
 | `gg` / `G`     | Jump to top / bottom                            |
 | `ctrl+d` / `ctrl+u` | Half-page down / up                        |
+| `ctrl+f` / `ctrl+b` | Page down / up                        |
 | `/`            | Search within the current pane                  |
 | `n` / `N`      | Next / previous search match                    |
 | `a`            | Create a new event / contact in the selected collection |

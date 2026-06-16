@@ -64,6 +64,7 @@ func parseEvent(c *goical.Component, collectionID string) (model.Event, bool) {
 		Summary:      textValue(c, goical.PropSummary),
 		Description:  textValue(c, goical.PropDescription),
 		Location:     textValue(c, goical.PropLocation),
+		URL:          text(c, goical.PropURL),
 		Status:       text(c, goical.PropStatus),
 		Rev:          text(c, "LAST-MODIFIED"),
 	}
