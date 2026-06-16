@@ -21,10 +21,14 @@ type confirmPrompt struct {
 
 // view renders the prompt centered in the given terminal size.
 func (c *confirmPrompt) view(width, height int) string {
+	yes := c.theme.StatusKey.Render(" y ") + c.theme.Value.Render(" delete")
+	no := c.theme.StatusKey.Render(" n ") + c.theme.Value.Render(" cancel")
+
 	var b strings.Builder
 	b.WriteString(c.theme.Title.Render(c.title) + "\n\n")
 	b.WriteString(c.theme.Value.Render(c.message) + "\n")
-	b.WriteString("\n" + c.theme.Help.Render("y delete · n / esc cancel"))
+	b.WriteString("\n" + yes + "    " + no)
+	b.WriteString("\n" + c.theme.Help.Render("esc also cancels"))
 
 	content := b.String()
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,

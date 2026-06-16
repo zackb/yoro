@@ -38,6 +38,13 @@ func (p *contactsPane) isSearching() bool { return p.searching }
 
 type storeLoadedMsg struct{ err error }
 
+// deleteDoneMsg reports the result of an async delete, so the (possibly slow)
+// DAV round-trip never blocks the UI thread.
+type deleteDoneMsg struct {
+	domain Mode
+	err    error
+}
+
 // App is the root bubbletea model.
 type App struct {
 	store store.Store
@@ -54,10 +61,12 @@ type App struct {
 	loadErr error
 	spin    spinner.Model
 
-	create   *createForm    // non-nil while the create overlay is open
-	confirm  *confirmPrompt // non-nil while the delete confirmation is open
-	showHelp bool
-	status   string
+	create    *createForm    // non-nil while the create overlay is open
+	confirm   *confirmPrompt // non-nil while the delete confirmation is open
+	busy      bool           // an async mutation (delete) is in flight
+	busyLabel string         // spinner caption while busy
+	showHelp  bool
+	status    string
 }
 
 // New constructs the root model over a store.
@@ -110,10 +119,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case spinner.TickMsg:
-		if a.loading {
+		if a.loading || a.busy {
 			var cmd tea.Cmd
 			a.spin, cmd = a.spin.Update(msg)
 			return a, cmd
+		}
+		return a, nil
+
+	case deleteDoneMsg:
+		a.busy = false
+		switch msg.domain {
+		case ModeCalendar:
+			if msg.err != nil {
+				a.cal.status = "delete failed: " + msg.err.Error()
+			} else {
+				a.cal.refresh()
+				a.cal.status = "deleted event"
+			}
+		case ModeContacts:
+			if msg.err != nil {
+				a.con.status = "delete failed: " + msg.err.Error()
+			} else {
+				a.con.refresh()
+				a.con.status = "deleted contact"
+			}
 		}
 		return a, nil
 
@@ -132,6 +161,12 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The delete confirmation is modal: it captures all keys until answered.
 	if a.confirm != nil {
 		return a.handleConfirm(msg)
+	}
+
+	// While an async mutation is in flight, swallow keys so a second action
+	// can't race the first.
+	if a.busy {
+		return a, nil
 	}
 
 	// When a pane owns text input (search), route everything to it first.
@@ -270,40 +305,44 @@ func (a *App) openDelete() {
 	}
 }
 
-// handleConfirm routes a key to the open delete confirmation, performing the
-// deletion on y and dismissing on n/esc.
+// handleConfirm routes a key to the open delete confirmation, kicking off the
+// async deletion on y and dismissing on n/esc.
 func (a App) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		a.performDelete()
+		c := a.confirm
 		a.confirm = nil
+		a.busy = true
+		a.busyLabel = "deleting " + noun(c.domain)
+		return a, tea.Batch(a.spin.Tick, a.deleteCmd(c))
 	case "n", "N", "esc", "q":
 		a.confirm = nil
 	}
 	return a, nil
 }
 
-// performDelete removes the confirmed item via the store and refreshes the pane,
-// reporting success or failure in the pane status line.
-func (a *App) performDelete() {
-	ctx := context.Background()
-	c := a.confirm
-	switch c.domain {
-	case ModeCalendar:
-		if err := a.store.DeleteEvent(ctx, c.colID, c.path); err != nil {
-			a.cal.status = "delete failed: " + err.Error()
-			return
+// deleteCmd performs the store delete off the UI thread (the DAV round-trip can
+// take a moment) and reports completion via deleteDoneMsg.
+func (a App) deleteCmd(c *confirmPrompt) tea.Cmd {
+	st := a.store
+	return func() tea.Msg {
+		ctx := context.Background()
+		var err error
+		switch c.domain {
+		case ModeCalendar:
+			err = st.DeleteEvent(ctx, c.colID, c.path)
+		case ModeContacts:
+			err = st.DeleteContact(ctx, c.colID, c.path)
 		}
-		a.cal.refresh()
-		a.cal.status = "deleted event"
-	case ModeContacts:
-		if err := a.store.DeleteContact(ctx, c.colID, c.path); err != nil {
-			a.con.status = "delete failed: " + err.Error()
-			return
-		}
-		a.con.refresh()
-		a.con.status = "deleted contact"
+		return deleteDoneMsg{domain: c.domain, err: err}
 	}
+}
+
+func noun(m Mode) string {
+	if m == ModeContacts {
+		return "contact"
+	}
+	return "event"
 }
 
 // handleCreate routes a key to the open create/edit overlay, persisting on submit.
@@ -429,6 +468,9 @@ func (a App) statusBar() string {
 	}
 
 	status := a.paneStatus()
+	if a.busy {
+		status = a.spin.View() + " " + a.busyLabel + "…"
+	}
 	hintText := "h/j/k/l move · / search · tab switch · ? help · q quit"
 	if a.mode == ModeContacts && len(a.con.sources) > 1 {
 		hintText = "s source · " + hintText
