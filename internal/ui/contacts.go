@@ -305,35 +305,53 @@ func (p *contactsPane) booksBody(w int) string {
 	return b.String()
 }
 
+// rowPrefixW is the fixed leading width of every list row: a tiny photo
+// thumbnail (or the source glyph) plus a separating space. Keeping it constant
+// aligns the names regardless of which contacts have photos.
+const rowPrefixW = 3
+
 func (p *contactsPane) listBody(w, h int) string {
 	if p.searching {
 		// Show the search input on the first line, list below.
 		p.search.Width = w - 2
 	}
-	glyph := p.provenanceGlyph()
-	var lines []string
-	for _, idx := range p.filtered {
-		lines = append(lines, p.contactRow(p.all[idx], glyph, w))
+	names := make([]string, len(p.filtered))
+	for i, idx := range p.filtered {
+		names[i] = p.all[idx].DisplayName()
 	}
-	visible, top := scrollWindow(lines, p.curIdx, max0(h))
+	visible, top := scrollWindow(names, p.curIdx, max0(h))
+	glyph := p.provenanceGlyph()
+	nameW := max0(w - rowPrefixW)
 	var b strings.Builder
 	if p.searching {
 		b.WriteString(p.search.View())
 		b.WriteByte('\n')
 	}
-	for i, line := range visible {
+	// Build prefixes only for visible rows so off-screen photos aren't
+	// transmitted to the terminal until scrolled into view.
+	for i, name := range visible {
 		idx := top + i
-		b.WriteString(p.theme.SelectStyle(idx == p.curIdx, p.focus == 1 && !p.searching).Render(PadRight(line, w)))
+		prefix := p.rowPrefix(p.all[p.filtered[idx]], glyph)
+		styled := p.theme.SelectStyle(idx == p.curIdx, p.focus == 1 && !p.searching).
+			Render(PadRight(Truncate(name, nameW), nameW))
+		b.WriteString(prefix + styled)
 		b.WriteByte('\n')
 	}
-	if len(lines) == 0 {
+	if len(p.filtered) == 0 {
 		b.WriteString(p.theme.ItemDim.Render("no contacts"))
 	}
 	return b.String()
 }
 
-func (p *contactsPane) contactRow(c model.Contact, glyph string, w int) string {
-	return Truncate(fmt.Sprintf("%s %s", glyph, c.DisplayName()), w)
+// rowPrefix returns the width-3 leading cell for a contact: a 2×1 photo
+// thumbnail when one is available, else the source glyph. The thumbnail is raw
+// (kept outside SelectStyle) so the placeholder's id-encoding color isn't
+// overwritten by the row's foreground style.
+func (p *contactsPane) rowPrefix(c model.Contact, glyph string) string {
+	if block, ok := p.gfx.thumbnail(c.Photo, 2, 1); ok {
+		return block + " "
+	}
+	return p.theme.ItemDim.Render(glyph) + "  "
 }
 
 // provenanceGlyph returns the cloud (DAV) or disk (local) glyph for the active

@@ -102,23 +102,45 @@ func (g *graphics) avatar(data []byte, cols int) (block string, rows int, ok boo
 	if err != nil {
 		return "", 0, false
 	}
-	cols = clamp(cols, 2, len(diacritics))
-
 	b := img.Bounds()
 	iw, ih := b.Dx(), b.Dy()
 	if iw == 0 || ih == 0 {
 		return "", 0, false
 	}
+	cols = clamp(cols, 2, len(diacritics))
 	rows = clamp(cols*ih/(iw*2), 1, min(12, len(diacritics)))
+	block, ok = g.place(data, cols, rows)
+	return block, rows, ok
+}
 
-	id := imageID(data)
+// thumbnail returns a fixed cols×rows placeholder grid for an inline avatar
+// (e.g. a contact-list row). It distorts the photo to fill the box rather than
+// preserving aspect, since the row height is fixed.
+func (g *graphics) thumbnail(data []byte, cols, rows int) (string, bool) {
+	return g.place(data, cols, rows)
+}
+
+// place transmits the image once at the given cell geometry and returns its
+// placeholder grid. The id folds in cols/rows, so the same photo can appear at
+// different sizes (list thumbnail vs detail avatar) with independent placements.
+func (g *graphics) place(data []byte, cols, rows int) (string, bool) {
+	if !g.enabled || len(data) == 0 {
+		return "", false
+	}
+	cols = clamp(cols, 1, len(diacritics))
+	rows = clamp(rows, 1, len(diacritics))
+	id := imageID(data, cols, rows)
 	if !g.sent[id] {
+		img, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return "", false
+		}
 		if err := g.transmit(id, downscale(img, 320), cols, rows); err != nil {
-			return "", 0, false
+			return "", false
 		}
 		g.sent[id] = true
 	}
-	return placeholderBlock(id, cols, rows), rows, true
+	return placeholderBlock(id, cols, rows), true
 }
 
 // transmit sends the image's pixels to the terminal as a PNG, creating a
@@ -188,12 +210,14 @@ func tmuxWrap(s string) string {
 
 // imageID hashes the photo bytes to a stable 24-bit, nonzero kitty image id
 // (24 bits so it fits a truecolor foreground without a high-byte diacritic).
-func imageID(data []byte) uint32 {
+func imageID(data []byte, cols, rows int) uint32 {
 	const offset, prime = 2166136261, 16777619
 	h := uint32(offset)
 	for _, c := range data {
 		h = (h ^ uint32(c)) * prime
 	}
+	h = (h ^ uint32(cols)) * prime
+	h = (h ^ uint32(rows)) * prime
 	id := h & 0xffffff
 	if id == 0 {
 		id = 1
