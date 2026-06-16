@@ -7,8 +7,10 @@ package dav
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -25,6 +27,13 @@ import (
 // calendars, address books, or both; whichever discovery succeeds is used.
 type DAV struct {
 	sourceID string
+
+	// hc and base back the raw PROPFIND fallback used to enumerate address
+	// objects on servers (notably Google) that reject the addressbook-query
+	// REPORT. base is the endpoint's scheme://host; PROPFIND targets are the
+	// absolute collection/object paths returned by discovery.
+	hc   webdav.HTTPClient
+	base string
 
 	cal      *caldav.Client
 	calHome  string
@@ -45,7 +54,10 @@ type DAV struct {
 // only if neither CalDAV nor CardDAV could be reached.
 func New(ctx context.Context, sourceID, endpoint, username, password string) (*DAV, error) {
 	hc := webdav.HTTPClientWithBasicAuth(http.DefaultClient, username, password)
-	d := &DAV{sourceID: sourceID, calCache: map[string]ical.File{}}
+	d := &DAV{sourceID: sourceID, hc: hc, calCache: map[string]ical.File{}}
+	if u, err := url.Parse(endpoint); err == nil {
+		d.base = u.Scheme + "://" + u.Host
+	}
 
 	if c, err := caldav.NewClient(hc, endpoint); err == nil {
 		if principal, err := c.FindCurrentUserPrincipal(ctx); err == nil {
@@ -164,9 +176,16 @@ func (d *DAV) Contacts(ctx context.Context, colID string) ([]model.Contact, erro
 	if d.card == nil {
 		return nil, nil
 	}
-	objs, err := d.card.QueryAddressBook(ctx, model.NativeID(d.sourceID, colID), &carddav.AddressBookQuery{
+	book := model.NativeID(d.sourceID, colID)
+	objs, err := d.card.QueryAddressBook(ctx, book, &carddav.AddressBookQuery{
 		DataRequest: carddav.AddressDataRequest{AllProp: true},
 	})
+	if err != nil {
+		// Google (and some others) reject the addressbook-query REPORT with 400.
+		// Fall back to enumerating object hrefs with a plain PROPFIND, then
+		// fetching them via addressbook-multiget, which those servers accept.
+		objs, err = d.multiGetAll(ctx, book)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +206,68 @@ func (d *DAV) Contacts(ctx context.Context, colID string) ([]model.Contact, erro
 		out = append(out, cs...)
 	}
 	return out, nil
+}
+
+// multiGetAll enumerates an address book's object hrefs with a Depth:1 PROPFIND
+// (requesting only getetag, which servers reliably return) and fetches them with
+// addressbook-multiget. The multiget uses a bare address-data request: go-webdav's
+// AllProp emits an <allprop/> child that Google rejects, while an empty
+// address-data element already means "all properties".
+func (d *DAV) multiGetAll(ctx context.Context, book string) ([]carddav.AddressObject, error) {
+	hrefs, err := d.enumerate(ctx, book)
+	if err != nil {
+		return nil, err
+	}
+	if len(hrefs) == 0 {
+		return nil, nil
+	}
+	return d.card.MultiGetAddressBook(ctx, book, &carddav.AddressBookMultiGet{
+		Paths:       hrefs,
+		DataRequest: carddav.AddressDataRequest{},
+	})
+}
+
+// enumerate issues a Depth:1 PROPFIND for getetag against the collection and
+// returns the hrefs of its member objects (those carrying an etag; the
+// collection itself, which does not, is skipped).
+func (d *DAV) enumerate(ctx context.Context, collection string) ([]string, error) {
+	const body = `<?xml version="1.0" encoding="utf-8"?>` +
+		`<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>`
+	req, err := http.NewRequestWithContext(ctx, "PROPFIND", d.base+collection, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Depth", "1")
+	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
+	resp, err := d.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMultiStatus {
+		return nil, fmt.Errorf("dav: enumerate %s: %s", collection, resp.Status)
+	}
+	var ms struct {
+		Responses []struct {
+			Href     string `xml:"href"`
+			Propstat []struct {
+				Status string `xml:"status"`
+				ETag   string `xml:"prop>getetag"`
+			} `xml:"propstat"`
+		} `xml:"response"`
+	}
+	if err := xml.NewDecoder(resp.Body).Decode(&ms); err != nil {
+		return nil, err
+	}
+	var hrefs []string
+	for _, r := range ms.Responses {
+		for _, ps := range r.Propstat {
+			if strings.Contains(ps.Status, " 200 ") && ps.ETag != "" {
+				hrefs = append(hrefs, r.Href)
+			}
+		}
+	}
+	return hrefs, nil
 }
 
 // PutEvent creates or replaces a calendar object. For create the UID is fresh,

@@ -168,6 +168,10 @@ func (p *contactsPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.move(p.listHeight() / 2)
 	case key.Matches(km, p.keys.HalfUp):
 		p.move(-p.listHeight() / 2)
+	case key.Matches(km, p.keys.PageDown):
+		p.move(p.listHeight())
+	case key.Matches(km, p.keys.PageUp):
+		p.move(-p.listHeight())
 	case key.Matches(km, p.keys.Bottom):
 		p.moveTo(len(p.filtered) - 1)
 	case key.Matches(km, p.keys.Top):

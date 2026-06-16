@@ -24,6 +24,8 @@ type KeyMap struct {
 	Bottom   key.Binding
 	HalfDown key.Binding
 	HalfUp   key.Binding
+	PageDown key.Binding
+	PageUp   key.Binding
 
 	// Search
 	Search    key.Binding
@@ -65,6 +67,8 @@ func DefaultKeyMap() KeyMap {
 		Bottom:   key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
 		HalfDown: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "half-page down")),
 		HalfUp:   key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "half-page up")),
+		PageDown: key.NewBinding(key.WithKeys("ctrl+f", "pgdown"), key.WithHelp("ctrl+f", "page down")),
+		PageUp:   key.NewBinding(key.WithKeys("ctrl+b", "pgup"), key.WithHelp("ctrl+b", "page up")),
 
 		Search:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		NextMatch: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),

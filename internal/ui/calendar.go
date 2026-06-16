@@ -127,6 +127,10 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 		p.moveDown(max0(p.height / 2))
 	case key.Matches(km, p.keys.HalfUp):
 		p.moveUp(max0(p.height / 2))
+	case key.Matches(km, p.keys.PageDown):
+		p.moveDown(max0(p.height))
+	case key.Matches(km, p.keys.PageUp):
+		p.moveUp(max0(p.height))
 	case key.Matches(km, p.keys.Top):
 		if km.String() == "g" {
 			p.cursorTo(0)

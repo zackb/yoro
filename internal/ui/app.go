@@ -381,6 +381,7 @@ func (a App) helpView() string {
 		row(a.theme, "j / k", "down / up"),
 		row(a.theme, "gg / G", "top / bottom"),
 		row(a.theme, "ctrl+d / ctrl+u", "half-page down / up"),
+		row(a.theme, "ctrl+f / ctrl+b", "page down / up"),
 		row(a.theme, "/ ", "search in pane"),
 		"",
 		section(a.theme, "Calendar"),
