@@ -38,6 +38,7 @@ type contactsPane struct {
 	search    textinput.Model
 	query     string
 
+	gfx    *graphics
 	status string
 }
 
@@ -51,6 +52,7 @@ func newContactsPane(theme Theme, keys KeyMap, st store.Store) *contactsPane {
 		store:  st,
 		search: ti,
 		focus:  1,
+		gfx:    newGraphics(),
 	}
 }
 
@@ -359,11 +361,15 @@ func (p *contactsPane) detailBody(w int) string {
 	}
 	b.WriteString("\n")
 
-	avatar := IconPerson
-	if len(c.Photo) > 0 {
-		avatar = IconPerson + " [photo]"
+	if block, _, ok := p.gfx.avatar(c.Photo, avatarWidth(w)); ok {
+		b.WriteString(block + "\n\n")
+	} else {
+		avatar := IconPerson
+		if len(c.Photo) > 0 {
+			avatar = IconPerson + " [photo]"
+		}
+		b.WriteString(p.theme.ItemDim.Render(avatar) + "\n\n")
 	}
-	b.WriteString(p.theme.ItemDim.Render(avatar) + "\n\n")
 
 	for _, e := range c.Emails {
 		b.WriteString(p.field(IconEmail, e.Value, typeLabel(e.Types), w))
