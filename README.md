@@ -19,7 +19,9 @@ and vim keybindings throughout.
 
 > **Status: early.** Yoro browses local *and* CalDAV/CardDAV calendars and contacts, and can
 > **create** (`a`), **edit** (`e`), and **delete** (`d`) events and contacts, persisted to the
-> local file or the DAV server. Editing recurring events is next — see [DESIGN.md](DESIGN.md).
+> local file or the DAV server. Recurring events can be created, edited, and deleted as a
+> whole series via a structured repeat picker; per-instance exceptions are next — see
+> [DESIGN.md](DESIGN.md).
 
 ## Features
 
@@ -29,7 +31,8 @@ and vim keybindings throughout.
 - **Two modes, one feel.** A Calendar mode and a Contacts mode that share the same vim
   navigation and preview-follows-cursor behavior.
 - **Calendar.** A day-grouped agenda with a mini-month navigator and per-collection color
-  toggles. Recurring events (`RRULE`/`RDATE`/`EXDATE`) are expanded on the fly.
+  toggles. Recurring events (`RRULE`/`RDATE`/`EXDATE`) are expanded on the fly, and a
+  structured **Repeat** picker in the create/edit form sets the recurrence (whole series).
 - **Contacts.** A three-column miller view (address books → contacts → detail) with live
   search.
 - **Modern graphics.** Uses the kitty graphics protocol to render contact photos where the
@@ -125,8 +128,8 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `ctrl+d` / `ctrl+u` | Half-page down / up                        |
 | `ctrl+f` / `ctrl+b` | Page down / up                             |
 | `a`            | Create a new event / contact in the selected collection |
-| `e`            | Edit the selected event / contact (non-recurring) |
-| `d`            | Delete the selected event / contact (non-recurring) |
+| `e`            | Edit the selected event / contact (recurring edits apply to the whole series) |
+| `d`            | Delete the selected event / contact (recurring deletes the whole series) |
 | `R`            | Reload the store from disk                       |
 | `?`            | Toggle help                                     |
 | `q` / `ctrl+c` | Quit                                            |
@@ -167,7 +170,8 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 - [x] Create new events and contacts (local file write + DAV `PUT`)
 - [x] Edit existing events and contacts in place (preserves unmodeled fields)
 - [x] Delete events and contacts (local file + DAV)
-- [ ] Editing/deleting recurring events (master vs single instance)
+- [x] Create/edit/delete recurring events (whole series, structured repeat picker)
+- [ ] Per-instance recurring edits (`RECURRENCE-ID` / this-and-future)
 - [ ] `If-Match` conditional `PUT`s once go-webdav exposes them
 - [ ] Full month-grid calendar view (toggle)
 
