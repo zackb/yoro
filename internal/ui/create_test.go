@@ -216,6 +216,66 @@ func TestEventFormPreservesUnmodeledRule(t *testing.T) {
 	}
 }
 
+// TestContactTypeChipIsFocusable confirms the TYPE chip is its own focus stop:
+// tabbing past the email value lands on it, and ←/→ cycles the type (no ctrl+t
+// needed) while leaving the value untouched.
+func TestContactTypeChipIsFocusable(t *testing.T) {
+	f := newContactForm(DefaultTheme(), model.Collection{Name: "B"}, "")
+	setText(f, "first", "Ada")
+	f.focus = indexOfGroup(f, "email")
+	f.syncFocus()
+	typeRunes(f, "ada@home.example")
+
+	// Tab off the value: the next stop is the chip, not the next field.
+	press(f, tea.KeyTab)
+	if !f.cur().typ {
+		t.Fatalf("tab did not land on the type chip: %+v", f.cur())
+	}
+
+	// emailTypes = {home, work, other}: → advances home→work.
+	press(f, tea.KeyRight)
+	c, err := f.buildContact()
+	if err != nil {
+		t.Fatalf("buildContact: %v", err)
+	}
+	if len(c.Emails) != 1 || c.Emails[0].Value != "ada@home.example" {
+		t.Fatalf("value corrupted by chip cycling: %+v", c.Emails)
+	}
+	if len(c.Emails[0].Types) == 0 || c.Emails[0].Types[0] != "work" {
+		t.Errorf("type not cycled with arrow: %+v", c.Emails[0].Types)
+	}
+
+	// ← steps back to home.
+	press(f, tea.KeyLeft)
+	c, _ = f.buildContact()
+	if len(c.Emails[0].Types) == 0 || c.Emails[0].Types[0] != "home" {
+		t.Errorf("left did not return to home: %+v", c.Emails[0].Types)
+	}
+}
+
+// TestAddressChipIsFirstStop confirms the address TYPE chip — which renders on
+// the header line above the components — is the group's first focus stop, so
+// tabbing into the address lands on it instead of jumping past the components.
+func TestAddressChipIsFirstStop(t *testing.T) {
+	f := newContactForm(DefaultTheme(), model.Collection{Name: "B"}, "")
+	// Walk to the very first ref of the address group.
+	for i, r := range f.refs() {
+		if f.fields[r.fi].group == "address" {
+			f.focus = i
+			break
+		}
+	}
+	f.syncFocus()
+	if !(f.cur().typ && f.fields[f.cur().fi].kind == kindAddr) {
+		t.Fatalf("address group's first focus stop is not the chip: %+v", f.cur())
+	}
+	// ←/→ cycles it right here, no tabbing through components first.
+	press(f, tea.KeyRight) // addrTypes = {home, work, other}: home->work
+	if got := f.fields[f.cur().fi].types[f.fields[f.cur().fi].typeIdx]; got != "work" {
+		t.Errorf("address chip not cycled: %q", got)
+	}
+}
+
 // setChoice selects the given option on a kindChoice field by key.
 func setChoice(f *createForm, key, opt string) {
 	for i := range f.fields {
@@ -227,10 +287,11 @@ func setChoice(f *createForm, key, opt string) {
 	}
 }
 
-// indexOfGroup returns the focus index of the first input of the given group.
+// indexOfGroup returns the focus index of the first editable input of the given
+// group, skipping the TYPE chip (which can be the group's first focus stop).
 func indexOfGroup(f *createForm, group string) int {
 	for i, r := range f.refs() {
-		if f.fields[r.fi].group == group {
+		if f.fields[r.fi].group == group && !r.typ {
 			return i
 		}
 	}

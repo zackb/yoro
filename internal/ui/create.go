@@ -60,9 +60,14 @@ type formField struct {
 	extended string
 }
 
-// focusRef points at one editable input: a field, plus a sub-index for the
-// multi-line address row.
-type focusRef struct{ fi, si int }
+// focusRef points at one focusable element: a field, plus a sub-index for the
+// multi-line address row, or its TYPE chip (typ) for typed/address rows. The
+// type chip is its own focus stop so it can be cycled with ←/→ like the event
+// recurrence picker, instead of relying on a hidden ctrl+t.
+type focusRef struct {
+	fi, si int
+	typ    bool
+}
 
 // createForm is the modal overlay for creating or editing an event or contact.
 // It is a pure input widget: App reads its values on submit, persists via the
@@ -338,6 +343,9 @@ func formatDateField(t *time.Time) string {
 func (f *createForm) update(msg tea.Msg) (submitted, cancelled bool, cmd tea.Cmd) {
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
+		if f.cur().typ {
+			return false, false, nil
+		}
 		ip := f.inputPtr(f.cur())
 		*ip, cmd = ip.Update(msg)
 		return false, false, cmd
@@ -354,17 +362,17 @@ func (f *createForm) update(msg tea.Msg) (submitted, cancelled bool, cmd tea.Cmd
 		f.focusBy(-1)
 		return false, false, nil
 	case "left":
-		if f.curIsChoice() {
-			f.cycleChoice(-1)
+		if f.curIsSelector() {
+			f.cycleSelection(-1)
 			return false, false, nil
 		}
 	case "right":
-		if f.curIsChoice() {
-			f.cycleChoice(1)
+		if f.curIsSelector() {
+			f.cycleSelection(1)
 			return false, false, nil
 		}
 	case "ctrl+t":
-		f.cycleType()
+		f.cycleSelection(1)
 		return false, false, nil
 	case "ctrl+n":
 		f.addRow()
@@ -373,21 +381,34 @@ func (f *createForm) update(msg tea.Msg) (submitted, cancelled bool, cmd tea.Cmd
 		f.delRow()
 		return false, false, nil
 	}
+	if f.cur().typ {
+		return false, false, nil
+	}
 	ip := f.inputPtr(f.cur())
 	*ip, cmd = ip.Update(msg)
 	return false, false, cmd
 }
 
-// refs lists every editable input in display order.
+// refs lists every focusable element in display order. Typed and address rows
+// contribute their value input(s) followed by their cyclable TYPE chip.
 func (f *createForm) refs() []focusRef {
 	var r []focusRef
 	for i := range f.fields {
-		if f.fields[i].kind == kindAddr {
+		switch f.fields[i].kind {
+		case kindAddr:
+			// The chip sits on the address header line, above the components, so
+			// it is the first focus stop (matching top-to-bottom reading order).
+			r = append(r, focusRef{fi: i, typ: true})
 			for s := range f.fields[i].sub {
-				r = append(r, focusRef{i, s})
+				r = append(r, focusRef{fi: i, si: s})
 			}
-		} else {
-			r = append(r, focusRef{i, 0})
+		case kindTyped:
+			// The chip sits to the right of the value on the same line, so it
+			// follows the value (left-to-right reading order).
+			r = append(r, focusRef{fi: i})
+			r = append(r, focusRef{fi: i, typ: true})
+		default:
+			r = append(r, focusRef{fi: i})
 		}
 	}
 	return r
@@ -415,7 +436,8 @@ func (f *createForm) inputPtr(ref focusRef) *textinput.Model {
 	return &fld.input
 }
 
-// syncFocus blurs every input and focuses the current one.
+// syncFocus blurs every input and focuses the current one. A focused TYPE chip
+// is not a text input, so no input is focused in that case.
 func (f *createForm) syncFocus() {
 	for i := range f.fields {
 		f.fields[i].input.Blur()
@@ -423,7 +445,9 @@ func (f *createForm) syncFocus() {
 			f.fields[i].sub[s].Blur()
 		}
 	}
-	f.inputPtr(f.cur()).Focus()
+	if cur := f.cur(); !cur.typ {
+		f.inputPtr(cur).Focus()
+	}
 }
 
 func (f *createForm) focusBy(d int) {
@@ -445,25 +469,22 @@ func (f *createForm) focusToField(fi int) {
 	f.syncFocus()
 }
 
-func (f *createForm) cycleType() {
-	fld := &f.fields[f.cur().fi]
-	if len(fld.types) > 0 {
-		fld.typeIdx = (fld.typeIdx + 1) % len(fld.types)
-	}
-}
-
-// cycleChoice steps the focused choice field by d (wrapping). No-op otherwise.
-func (f *createForm) cycleChoice(d int) {
+// cycleSelection steps the focused field's option (TYPE chip or recurrence
+// choice) by d, wrapping. No-op when the field has no options.
+func (f *createForm) cycleSelection(d int) {
 	fld := &f.fields[f.cur().fi]
 	n := len(fld.types)
-	if fld.kind != kindChoice || n == 0 {
+	if n == 0 {
 		return
 	}
 	fld.typeIdx = (fld.typeIdx + d + n) % n
 }
 
-func (f *createForm) curIsChoice() bool {
-	return f.fields[f.cur().fi].kind == kindChoice
+// curIsSelector reports whether the focused element is option-cyclable: a TYPE
+// chip or a kindChoice field. Such elements take ←/→ to cycle.
+func (f *createForm) curIsSelector() bool {
+	ref := f.cur()
+	return ref.typ || f.fields[ref.fi].kind == kindChoice
 }
 
 func (f *createForm) groupCount(g string) int {
@@ -707,13 +728,31 @@ func parseFormDate(s string) (*time.Time, error) {
 	return &t, nil
 }
 
-// typeBadge renders the current TYPE of a typed/address row.
-func (f *createForm) typeBadge(fld *formField) string {
+// chevron renders a cyclable option as ‹ label ›, brightened when focused so the
+// affordance (and that it's the focused control) reads at a glance.
+func (f *createForm) chevron(label string, active bool) string {
+	s := "‹ " + label + " ›"
+	if active {
+		return f.theme.StatusKey.Render(s)
+	}
+	return f.theme.ItemDim.Render(s)
+}
+
+// typeChip renders a typed/address row's TYPE as a chevron control.
+func (f *createForm) typeChip(fld *formField, active bool) string {
 	label := "none"
 	if len(fld.types) > 0 {
 		label = fld.types[fld.typeIdx]
 	}
-	return f.theme.ItemDim.Render("[" + label + "]")
+	return f.chevron(label, active)
+}
+
+// marker returns the focus arrow when on is true, else blank padding.
+func (f *createForm) marker(on bool) string {
+	if on {
+		return f.theme.StatusKey.Render("▸ ")
+	}
+	return "  "
 }
 
 // bodyLines renders the field rows and reports the line index of the focused one.
@@ -722,33 +761,35 @@ func (f *createForm) bodyLines() (lines []string, focusLine int) {
 	for i := range f.fields {
 		fld := &f.fields[i]
 		if fld.kind == kindAddr {
-			lines = append(lines, "  "+f.theme.Label.Render(PadRight(fld.label, labelW))+" "+f.typeBadge(fld))
+			typeFocused := cur.fi == i && cur.typ
+			if typeFocused {
+				focusLine = len(lines)
+			}
+			lines = append(lines, f.marker(typeFocused)+f.theme.Label.Render(PadRight(fld.label, labelW))+" "+f.typeChip(fld, typeFocused))
 			for s := range fld.sub {
-				marker := "  "
-				if cur.fi == i && cur.si == s {
-					marker = f.theme.StatusKey.Render("▸ ")
+				subFocused := cur.fi == i && !cur.typ && cur.si == s
+				if subFocused {
 					focusLine = len(lines)
 				}
-				lines = append(lines, marker+f.theme.Label.Render(PadRight("  "+addrSubLabels[s], labelW))+" "+fld.sub[s].View())
+				lines = append(lines, f.marker(subFocused)+f.theme.Label.Render(PadRight("  "+addrSubLabels[s], labelW))+" "+fld.sub[s].View())
 			}
 			continue
 		}
-		marker := "  "
 		if cur.fi == i {
-			marker = f.theme.StatusKey.Render("▸ ")
 			focusLine = len(lines)
 		}
+		valFocused := cur.fi == i && !cur.typ
 		valView := fld.input.View()
 		if fld.kind == kindChoice {
 			opt := ""
 			if len(fld.types) > 0 {
 				opt = fld.types[fld.typeIdx]
 			}
-			valView = f.theme.Value.Render("‹ " + opt + " ›")
+			valView = f.chevron(opt, valFocused)
 		}
-		line := marker + f.theme.Label.Render(PadRight(fld.label, labelW)) + " " + valView
+		line := f.marker(valFocused) + f.theme.Label.Render(PadRight(fld.label, labelW)) + " " + valView
 		if fld.kind == kindTyped {
-			line += "  " + f.typeBadge(fld)
+			line += "  " + f.typeChip(fld, cur.fi == i && cur.typ)
 		}
 		lines = append(lines, line)
 	}
@@ -821,7 +862,7 @@ func (f *createForm) view(width, height int) string {
 
 func (f *createForm) helpText() string {
 	if f.domain == ModeContacts {
-		return "enter save · tab next · ^t type · ^n add · ^d remove · esc cancel"
+		return "enter save · tab next · ←/→ type · ^n add · ^d remove · esc cancel"
 	}
 	return "enter save · tab next · ←/→ repeat · esc cancel"
 }
