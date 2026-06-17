@@ -119,6 +119,48 @@ source. A \fBlocal\fR source takes \fBcalendars\fR and \fBcontacts\fR paths; a
 \fBdav\fR source takes \fBurl\fR, \fBusername\fR, and either \fBpassword\fR or
 \fBpassword_command\fR (run via the shell to print the secret). Source names must
 be unique. See \fIdocs/vdirsyncer.md\fR for the local-mirror workflow.
+.PP
+Calendars from every source overlay in the agenda; contacts are browsed one
+source at a time. Google, iCloud, and Fastmail require a provider-issued
+\fIapp password\fR (with 2-factor enabled), not the account password, and serve
+calendars and contacts from different hosts \(em add two \fBdav\fR sources, one
+per host. Nextcloud serves both from a single base URL. See
+\fIdocs/accounts.md\fR for per-provider recipes.
+.SS Examples
+A local vdir tree plus a Nextcloud account (one URL for both protocols):
+.PP
+.EX
+[[sources]]
+name = "local"
+type = "local"
+calendars = "~/.local/share/calendars"
+contacts  = "~/.local/share/contacts"
+
+[[sources]]
+name = "nextcloud"
+type = "dav"
+url  = "https://cloud.example.com/remote.php/dav/"
+username = "you"
+password_command = "pass yoro/nextcloud"
+.EE
+.PP
+iCloud, which splits calendars and contacts across two hosts:
+.PP
+.EX
+[[sources]]
+name = "icloud-calendar"
+type = "dav"
+url  = "https://caldav.icloud.com/"
+username = "you@icloud.com"
+password_command = "pass yoro/icloud"
+
+[[sources]]
+name = "icloud-contacts"
+type = "dav"
+url  = "https://contacts.icloud.com/"
+username = "you@icloud.com"
+password_command = "pass yoro/icloud"
+.EE
 .SH FILES
 .TP
 .I ~/.config/yoro/config.toml

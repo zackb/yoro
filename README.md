@@ -82,6 +82,10 @@ To browse more than one source — e.g. a local vdir plus a remote CalDAV/CardDA
 account — create `$XDG_CONFIG_HOME/yoro/config.toml` (usually
 `~/.config/yoro/config.toml`). Each `[[sources]]` block is one source, browsed in order.
 
+> **Connecting an account?** [docs/accounts.md](docs/accounts.md) has copy-paste
+> `[[sources]]` recipes for **local vdir, Nextcloud, Google, iCloud, and Fastmail**,
+> including where each provider's app password comes from.
+
 ```toml
 # A local vdir tree (the implicit default if you list no sources).
 [[sources]]
