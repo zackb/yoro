@@ -21,6 +21,13 @@ type Backend interface {
 	Contacts(ctx context.Context, colID string) ([]model.Contact, error)
 }
 
+// Connector is an optional Backend that needs a network handshake before its
+// collections can be enumerated. Connect runs inside Load, off the UI thread,
+// so a slow or unreachable server never blocks startup.
+type Connector interface {
+	Connect(ctx context.Context) error
+}
+
 // WriteBackend adds mutation. Defined now to fix the seam; implemented by a
 // future local-write or DAV backend, not in milestone 1.
 type WriteBackend interface {
@@ -61,17 +68,14 @@ func LocalSource(id, name, calendarsDir, contactsDir string) Source {
 	}
 }
 
-// DAVSource builds a Source backed by a read-only CalDAV/CardDAV backend,
-// connecting and discovering collections eagerly so errors surface at startup.
-func DAVSource(ctx context.Context, id, name, endpoint, username, password string) (Source, error) {
-	b, err := dav.New(ctx, id, endpoint, username, password)
-	if err != nil {
-		return Source{}, err
-	}
+// DAVSource builds a Source backed by a read-only CalDAV/CardDAV backend. The
+// backend connects lazily: discovery happens during Store.Load (off the UI
+// thread), not here, so construction never touches the network.
+func DAVSource(id, name, endpoint, username, password string) Source {
 	return Source{
 		SourceInfo: SourceInfo{ID: id, Name: name, Type: TypeDAV},
-		Backend:    b,
-	}, nil
+		Backend:    dav.New(id, endpoint, username, password),
+	}
 }
 
 // Compile-time assurance that the DAV backend satisfies WriteBackend.
@@ -102,6 +106,9 @@ type Match struct {
 type Store interface {
 	// Load scans and parses everything from every source.
 	Load(ctx context.Context) error
+	// Warnings returns non-fatal problems from the most recent Load, such as a
+	// source that failed to connect or enumerate (one human-readable line each).
+	Warnings() []string
 	// Sources returns the configured sources, in order, for provenance display.
 	Sources() []SourceInfo
 	// Collections returns all collections (calendars and address books).

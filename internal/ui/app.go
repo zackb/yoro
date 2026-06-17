@@ -40,7 +40,10 @@ func (p *contactsPane) isSearching() bool { return p.searching }
 func (p *calendarPane) setStatus(s string) { p.status = s }
 func (p *contactsPane) setStatus(s string) { p.status = s }
 
-type storeLoadedMsg struct{ err error }
+type storeLoadedMsg struct {
+	err      error
+	warnings []string
+}
 
 // deleteDoneMsg reports the result of an async delete, so the (possibly slow)
 // DAV round-trip never blocks the UI thread.
@@ -69,9 +72,10 @@ type App struct {
 	cal *calendarPane
 	con *contactsPane
 
-	loading bool
-	loadErr error
-	spin    spinner.Model
+	loading  bool
+	loadErr  error
+	loadWarn []string // non-fatal per-source problems from the last load
+	spin     spinner.Model
 
 	create    *createForm    // non-nil while the create overlay is open
 	confirm   *confirmPrompt // non-nil while the delete confirmation is open
@@ -104,7 +108,8 @@ func (a App) Init() tea.Cmd {
 }
 
 func (a App) load() tea.Msg {
-	return storeLoadedMsg{err: a.store.Load(context.Background())}
+	err := a.store.Load(context.Background())
+	return storeLoadedMsg{err: err, warnings: a.store.Warnings()}
 }
 
 func (a App) activePane() pane { return a.paneFor(a.mode) }
@@ -147,6 +152,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case storeLoadedMsg:
 		a.loading = false
 		a.loadErr = msg.err
+		a.loadWarn = msg.warnings
 		if msg.err == nil {
 			a.cal.refresh()
 			a.con.refresh()
@@ -467,12 +473,10 @@ func (a App) View() string {
 	}
 	if a.loading {
 		body := fmt.Sprintf("%s loading calendars and contacts…", a.spin.View())
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			a.theme.Title.Render("Yoro")+"\n\n"+body)
+		return a.splash(body)
 	}
 	if a.loadErr != nil {
-		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center,
-			a.theme.Title.Render("Yoro")+"\n\nfailed to load: "+a.loadErr.Error())
+		return a.splash("failed to load: " + a.loadErr.Error())
 	}
 	if a.create != nil {
 		return a.create.view(a.width, a.height)
@@ -512,6 +516,14 @@ func (a App) statusBar() string {
 	left := calChip + " " + conChip
 	if status != "" {
 		left += "  " + a.theme.StatusKey.Render(status)
+	}
+	if n := len(a.loadWarn); n > 0 {
+		warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")).Bold(true)
+		noun := "source"
+		if n > 1 {
+			noun = "sources"
+		}
+		left += "  " + warn.Render(fmt.Sprintf("⚠ %d %s unavailable", n, noun))
 	}
 	gap := a.width - lipgloss.Width(left) - lipgloss.Width(hints)
 	if gap < 1 {

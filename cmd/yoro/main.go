@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -74,8 +73,9 @@ func applyDirFlags(cfg *config.Config, calendars, contacts string) {
 }
 
 // buildSources turns config sources into store sources, constructing a backend
-// per source. DAV backends are connected eagerly so credential/connection
-// errors surface at startup.
+// per source. No network I/O happens here: DAV backends connect lazily during
+// Store.Load (off the UI thread), so the splash appears immediately and an
+// unreachable server surfaces as a non-fatal warning rather than a startup hang.
 func buildSources(cfg config.Config) ([]store.Source, error) {
 	var out []store.Source
 	for _, s := range cfg.Sources {
@@ -87,11 +87,7 @@ func buildSources(cfg config.Config) ([]store.Source, error) {
 			if err != nil {
 				return nil, fmt.Errorf("source %q: %w", s.Name, err)
 			}
-			src, err := store.DAVSource(context.Background(), s.Name, s.Name, s.URL, s.Username, secret)
-			if err != nil {
-				return nil, fmt.Errorf("source %q: %w", s.Name, err)
-			}
-			out = append(out, src)
+			out = append(out, store.DAVSource(s.Name, s.Name, s.URL, s.Username, secret))
 		default:
 			return nil, fmt.Errorf("source %q: unknown type %q", s.Name, s.Type)
 		}

@@ -38,8 +38,8 @@ func TestLive(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	d, err := New(ctx, src.Name, src.URL, src.Username, secret)
-	if err != nil {
+	d := New(src.Name, src.URL, src.Username, secret)
+	if err := d.Connect(ctx); err != nil {
 		t.Fatalf("connect %s: %v", src.URL, err)
 	}
 
@@ -142,8 +142,8 @@ func liveBackend(t *testing.T) *DAV {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := New(context.Background(), src.Name, src.URL, src.Username, secret)
-	if err != nil {
+	d := New(src.Name, src.URL, src.Username, secret)
+	if err := d.Connect(context.Background()); err != nil {
 		t.Fatalf("connect %s: %v", src.URL, err)
 	}
 	return d

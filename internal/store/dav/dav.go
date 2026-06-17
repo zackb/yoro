@@ -26,6 +26,7 @@ import (
 // calendars, address books, or both; whichever discovery succeeds is used.
 type DAV struct {
 	sourceID string
+	endpoint string
 
 	// hc and base back the raw PROPFIND fallback used to enumerate address
 	// objects on servers (notably Google) that reject the addressbook-query
@@ -40,25 +41,31 @@ type DAV struct {
 	cardHome string
 }
 
-// New connects to endpoint with basic auth and discovers the calendar and
-// address-book home sets. Discovery failures for one protocol are non-fatal:
-// the backend simply won't report that kind of collection. An error is returned
-// only if neither CalDAV nor CardDAV could be reached.
-func New(ctx context.Context, sourceID, endpoint, username, password string) (*DAV, error) {
+// New builds a DAV backend without touching the network. The actual CalDAV and
+// CardDAV discovery is deferred to Connect, which the store runs off the UI
+// thread so an unreachable server never blocks startup.
+func New(sourceID, endpoint, username, password string) *DAV {
 	hc := webdav.HTTPClientWithBasicAuth(http.DefaultClient, username, password)
-	d := &DAV{sourceID: sourceID, hc: hc}
+	d := &DAV{sourceID: sourceID, endpoint: endpoint, hc: hc}
 	if u, err := url.Parse(endpoint); err == nil {
 		d.base = u.Scheme + "://" + u.Host
 	}
+	return d
+}
 
-	if c, err := caldav.NewClient(hc, endpoint); err == nil {
+// Connect discovers the calendar and address-book home sets with basic auth.
+// Discovery failures for one protocol are non-fatal: the backend simply won't
+// report that kind of collection. An error is returned only if neither CalDAV
+// nor CardDAV could be reached.
+func (d *DAV) Connect(ctx context.Context) error {
+	if c, err := caldav.NewClient(d.hc, d.endpoint); err == nil {
 		if principal, err := c.FindCurrentUserPrincipal(ctx); err == nil {
 			if home, err := c.FindCalendarHomeSet(ctx, principal); err == nil {
 				d.cal, d.calHome = c, home
 			}
 		}
 	}
-	if c, err := carddav.NewClient(hc, endpoint); err == nil {
+	if c, err := carddav.NewClient(d.hc, d.endpoint); err == nil {
 		if principal, err := c.FindCurrentUserPrincipal(ctx); err == nil {
 			if home, err := c.FindAddressBookHomeSet(ctx, principal); err == nil {
 				d.card, d.cardHome = c, home
@@ -67,9 +74,9 @@ func New(ctx context.Context, sourceID, endpoint, username, password string) (*D
 	}
 
 	if d.cal == nil && d.card == nil {
-		return nil, fmt.Errorf("dav: no CalDAV or CardDAV collections discovered at %s", endpoint)
+		return fmt.Errorf("dav: no CalDAV or CardDAV collections discovered at %s", d.endpoint)
 	}
-	return d, nil
+	return nil
 }
 
 func (d *DAV) Collections(ctx context.Context) ([]model.Collection, error) {

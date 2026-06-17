@@ -50,6 +50,7 @@ type memStore struct {
 	events      map[string][]model.Event
 	todos       map[string][]model.Todo
 	contacts    map[string][]model.Contact
+	warnings    []string // non-fatal problems from the most recent Load
 }
 
 // New builds a Store over the given sources, browsed together.
@@ -73,17 +74,43 @@ func (s *memStore) Sources() []SourceInfo {
 }
 
 func (s *memStore) Load(ctx context.Context) error {
-	// Enumerate collections across all sources. A source that fails to
-	// enumerate (e.g. a DAV server is unreachable) is skipped so it can't take
+	// Connect and enumerate collections across all sources concurrently. Network
+	// discovery (DAV) happens here, off the UI thread, so a slow or unreachable
+	// server neither blocks startup nor delays the other sources. A source that
+	// fails to connect or enumerate is skipped with a warning so it can't take
 	// down browsing of the others.
-	var cols []model.Collection
+	var (
+		cols  []model.Collection
+		warns []string
+		colMu sync.Mutex
+	)
+	cg, cgctx := errgroup.WithContext(ctx)
 	for _, si := range s.sources {
-		cs, err := s.backends[si.ID].Collections(ctx)
-		if err != nil {
-			continue
-		}
-		cols = append(cols, cs...)
+		si := si
+		b := s.backends[si.ID]
+		cg.Go(func() error {
+			if c, ok := b.(Connector); ok {
+				if err := c.Connect(cgctx); err != nil {
+					colMu.Lock()
+					warns = append(warns, fmt.Sprintf("%s: %v", si.Name, err))
+					colMu.Unlock()
+					return nil
+				}
+			}
+			cs, err := b.Collections(cgctx)
+			if err != nil {
+				colMu.Lock()
+				warns = append(warns, fmt.Sprintf("%s: %v", si.Name, err))
+				colMu.Unlock()
+				return nil
+			}
+			colMu.Lock()
+			cols = append(cols, cs...)
+			colMu.Unlock()
+			return nil
+		})
 	}
+	_ = cg.Wait()
 
 	// Parse every collection concurrently, bounded by CPU count. Item-load
 	// failures are tolerated per collection rather than failing the whole load.
@@ -138,8 +165,15 @@ func (s *memStore) Load(ctx context.Context) error {
 	s.events = events
 	s.todos = todos
 	s.contacts = contacts
+	s.warnings = warns
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *memStore) Warnings() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string(nil), s.warnings...)
 }
 
 func (s *memStore) Reload(ctx context.Context, colID string) error {
