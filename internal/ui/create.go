@@ -17,6 +17,9 @@ import (
 // labelW is the column width reserved for field labels.
 const labelW = 12
 
+// formWidth is the outer width of the create/edit modal (including borders).
+const formWidth = 54
+
 // errStyle renders form validation errors.
 var errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))
 
@@ -853,16 +856,58 @@ func (f *createForm) view(width, height int) string {
 	if f.err != "" {
 		b.WriteString("\n" + errStyle.Render(f.err) + "\n")
 	}
-	b.WriteString("\n" + f.theme.Help.Render(f.helpText()))
+	b.WriteString("\n" + f.theme.Help.Render(packHelp(f.helpParts(), formWidth-2)))
 
 	content := b.String()
+	// +3 = two borders plus the (empty) title row Column always reserves; without
+	// it the final body line (the help) is truncated.
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,
-		f.theme.Column("", content, 54, lipgloss.Height(content)+2, true))
+		f.theme.Column("", content, formWidth, lipgloss.Height(content)+3, true))
 }
 
-func (f *createForm) helpText() string {
-	if f.domain == ModeContacts {
-		return "enter save · tab next · ←/→ type · ^n add · ^d remove · esc cancel"
+// helpParts lists the always-available actions plus hints contextual to the
+// focused field: ←/→ on a cyclable chip/choice, and ^n/^d on a multi-value row
+// (email/phone/address), so the add/remove affordance is called out exactly
+// where it applies.
+func (f *createForm) helpParts() []string {
+	parts := []string{"enter save", "tab next"}
+	ref := f.cur()
+	fld := &f.fields[ref.fi]
+	switch {
+	case ref.typ:
+		parts = append(parts, "←/→ type")
+	case fld.kind == kindChoice:
+		parts = append(parts, "←/→ "+strings.ToLower(fld.label))
 	}
-	return "enter save · tab next · ←/→ repeat · esc cancel"
+	if fld.group != "" {
+		parts = append(parts, "^n add", "^d remove")
+	}
+	return append(parts, "esc cancel")
+}
+
+// helpText joins the contextual hints into a single line (used by tests and as
+// the source for packHelp).
+func (f *createForm) helpText() string { return strings.Join(f.helpParts(), " · ") }
+
+// packHelp wraps the " · "-separated hints across as many lines as needed to fit
+// width, breaking only at separators so no hint is split mid-token.
+func packHelp(parts []string, width int) string {
+	var lines []string
+	cur := ""
+	for _, p := range parts {
+		cand := p
+		if cur != "" {
+			cand = cur + " · " + p
+		}
+		if cur != "" && lipgloss.Width(cand) > width {
+			lines = append(lines, cur)
+			cur = p
+		} else {
+			cur = cand
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return strings.Join(lines, "\n")
 }

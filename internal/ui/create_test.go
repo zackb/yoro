@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -274,6 +275,80 @@ func TestAddressChipIsFirstStop(t *testing.T) {
 	if got := f.fields[f.cur().fi].types[f.fields[f.cur().fi].typeIdx]; got != "work" {
 		t.Errorf("address chip not cycled: %q", got)
 	}
+}
+
+// TestHelpTextIsContextual confirms the add/remove and cycle hints appear only
+// where they apply, matching the app's context-sensitive status bar.
+func TestHelpTextIsContextual(t *testing.T) {
+	f := newContactForm(DefaultTheme(), model.Collection{Name: "B"}, "")
+
+	// A plain field offers no ^n/←→ hints.
+	if h := f.helpText(); strings.Contains(h, "^n") || strings.Contains(h, "←/→") {
+		t.Errorf("plain field help should be bare: %q", h)
+	}
+
+	// On an email row the add/remove hint appears.
+	f.focus = indexOfGroup(f, "email")
+	f.syncFocus()
+	if h := f.helpText(); !strings.Contains(h, "^n add") || !strings.Contains(h, "^d remove") {
+		t.Errorf("group field missing add/remove hint: %q", h)
+	}
+
+	// Tabbing to the chip adds the type-cycle hint too.
+	press(f, tea.KeyTab)
+	if h := f.helpText(); !strings.Contains(h, "←/→ type") {
+		t.Errorf("chip missing type hint: %q", h)
+	}
+
+	// The event recurrence picker labels the cycle hint with the field name.
+	e := newEventForm(DefaultTheme(), model.Collection{Name: "C"}, "")
+	for i, r := range e.refs() {
+		if e.fields[r.fi].key == "repeat" {
+			e.focus = i
+			break
+		}
+	}
+	e.syncFocus()
+	if h := e.helpText(); !strings.Contains(h, "←/→ repeat") {
+		t.Errorf("repeat picker missing cycle hint: %q", h)
+	}
+}
+
+// TestHelpRendersInView guards against the help line being clipped off the
+// bottom of the modal (Column reserves a title row, so the height budget must
+// account for it). It also confirms the packed hints survive into the output.
+func TestHelpRendersInView(t *testing.T) {
+	f := newContactForm(DefaultTheme(), model.Collection{Name: "P"}, "local")
+	f.focus = indexOfGroup(f, "email")
+	f.syncFocus()
+	press(f, tea.KeyTab) // chip: the longest (wrapping) help
+
+	out := stripANSI(f.view(100, 40))
+	for _, want := range []string{"^n add", "^d remove", "←/→ type", "esc cancel"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered form is missing help hint %q", want)
+		}
+	}
+}
+
+// stripANSI removes escape sequences so rendered output can be substring-checked.
+func stripANSI(s string) string {
+	var b strings.Builder
+	skip := false
+	for _, r := range s {
+		if r == '\x1b' {
+			skip = true
+			continue
+		}
+		if skip {
+			if r == 'm' {
+				skip = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // setChoice selects the given option on a kindChoice field by key.
