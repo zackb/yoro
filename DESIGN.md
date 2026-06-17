@@ -118,7 +118,16 @@ When editing a value (an email, a NOTE/DESCRIPTION):
    confirmation: local file remove, or DAV delete by href. Recurring events are
    refused for now. Mutations run async so a slow DAV round-trip never blocks the
    UI.
-4. Editing/deleting recurring events (master vs single `RECURRENCE-ID` instance).
+4. **Done — recurring events (whole series).** A structured "Repeat" picker in the
+   create/edit form (None/Daily/Weekly/Monthly/Yearly + Interval + Until) composes an
+   `RRULE`; `applyEventProps` now serializes it as a RECUR value (`setRecur` in
+   `internal/ical/encode.go`), so create/edit/delete all act on the master VEVENT for
+   local and DAV alike. Edit and delete are no longer refused. To avoid dropping rule
+   parts the picker can't model (`BYDAY`, `COUNT`, …), an edited event whose recurrence
+   rows are untouched keeps its original rule verbatim; changing the cadence regenerates
+   from the picker (`createForm.recurrence`). Still **future work**: per-instance edit/
+   delete (single `RECURRENCE-ID` override / `EXDATE`), this-and-future splitting, and
+   `BYDAY`/weekday multiselect in the picker.
 5. Visual mode for bulk record operations; richer in-field vim motions.
    (`If-Match` conditional PUTs land once go-webdav exposes the option; until then
    create, update, and delete are last-write-wins.)
@@ -130,8 +139,10 @@ Time, Duration, Location, Description, and URL; contacts expose the structured
 Name, multiple Emails/Phones/Addresses with TYPE labels, Org, Title, Role, URL,
 Birthday, Anniversary, and Note. Multi-value rows are added/removed with
 `ctrl+n`/`ctrl+d` and TYPE labels cycled with `ctrl+t`; the form shows its own
-key hints (see `internal/ui/create.go`). Still unmodeled in the form: event RRULE,
-attendees, and alarms — these round-trip losslessly via the mutate-`Raw`
+key hints (see `internal/ui/create.go`). Events also expose a structured Repeat/
+Interval/Until recurrence picker that composes the `RRULE` (whole-series). Still
+unmodeled in the form: event attendees and alarms (and recurrence beyond the
+picker's vocabulary) — these round-trip losslessly via the mutate-`Raw`
 persistence path, so editing an event that has them does not drop them.
 
 ### Note: local collection IDs are namespaced by domain

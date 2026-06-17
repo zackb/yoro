@@ -33,10 +33,15 @@ var (
 type fieldKind int
 
 const (
-	kindText  fieldKind = iota // one labeled input
-	kindTyped                  // value input + cyclable TYPE (email/phone)
-	kindAddr                   // structured address: several inputs + TYPE
+	kindText   fieldKind = iota // one labeled input
+	kindTyped                   // value input + cyclable TYPE (email/phone)
+	kindAddr                    // structured address: several inputs + TYPE
+	kindChoice                  // cyclable fixed option list (e.g. recurrence)
 )
+
+// freqOptions are the recurrence frequencies the structured picker offers.
+// "None" yields a non-recurring event.
+var freqOptions = []string{"None", "Daily", "Weekly", "Monthly", "Yearly"}
 
 // formField is one logical row in the create form.
 type formField struct {
@@ -123,6 +128,7 @@ func eventFields(e model.Event) []formField {
 	if dur <= 0 {
 		dur = 60
 	}
+	freq, interval, until, _ := parseRRule(e.RRule)
 	return []formField{
 		field("summary", "Summary", e.Summary),
 		field("date", "Date", e.Start.Local().Format("2006-01-02")),
@@ -131,7 +137,100 @@ func eventFields(e model.Event) []formField {
 		field("location", "Location", e.Location),
 		field("description", "Description", e.Description),
 		field("url", "URL", e.URL),
+		choiceRow("repeat", "Repeat", freqOptions, indexOf(freqOptions, freq)),
+		field("interval", "Every", interval),
+		field("until", "Until", until),
 	}
+}
+
+// parseRRule extracts the picker-modeled parts (FREQ, INTERVAL, UNTIL) from a
+// raw rule. freq is a freqOptions label ("None" when absent or a FREQ the picker
+// can't represent); interval defaults to "1"; until is reformatted to
+// YYYY-MM-DD. modeled is false when the rule carries any component the picker
+// doesn't expose (BYDAY, COUNT, …) or an unrepresentable FREQ — the caller uses
+// this to preserve such rules verbatim unless the user edits the cadence.
+func parseRRule(rule string) (freq, interval, until string, modeled bool) {
+	freq, interval, modeled = "None", "1", true
+	if strings.TrimSpace(rule) == "" {
+		return freq, interval, until, modeled
+	}
+	for _, part := range strings.Split(rule, ";") {
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(k)) {
+		case "FREQ":
+			switch strings.ToUpper(strings.TrimSpace(v)) {
+			case "DAILY":
+				freq = "Daily"
+			case "WEEKLY":
+				freq = "Weekly"
+			case "MONTHLY":
+				freq = "Monthly"
+			case "YEARLY":
+				freq = "Yearly"
+			default:
+				freq, modeled = "None", false
+			}
+		case "INTERVAL":
+			interval = strings.TrimSpace(v)
+		case "UNTIL":
+			if d, ok := parseUntil(v); ok {
+				until = d
+			} else {
+				modeled = false
+			}
+		default:
+			modeled = false
+		}
+	}
+	return freq, interval, until, modeled
+}
+
+// parseUntil reformats an RRULE UNTIL value (DATE or UTC DATE-TIME) to the
+// form's YYYY-MM-DD.
+func parseUntil(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	for _, layout := range []string{"20060102T150405Z", "20060102T150405", "20060102"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.Format("2006-01-02"), true
+		}
+	}
+	return "", false
+}
+
+// composeRRule builds a raw RRULE from the picker fields. It returns "" for the
+// "None" frequency. UNTIL is written to match the DTSTART value type: a UTC
+// date-time for timed events, a bare DATE for all-day ones (RFC 5545).
+func composeRRule(freq, interval, until string, allDay bool) string {
+	f := strings.ToUpper(strings.TrimSpace(freq))
+	if f == "" || f == "NONE" {
+		return ""
+	}
+	rule := "FREQ=" + f
+	if n, err := strconv.Atoi(strings.TrimSpace(interval)); err == nil && n > 1 {
+		rule += ";INTERVAL=" + strconv.Itoa(n)
+	}
+	if d, err := time.Parse("2006-01-02", strings.TrimSpace(until)); err == nil && until != "" {
+		if allDay {
+			rule += ";UNTIL=" + d.Format("20060102")
+		} else {
+			// Inclusive end-of-day in UTC so the final day's occurrence isn't clipped.
+			end := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.UTC)
+			rule += ";UNTIL=" + end.Format("20060102T150405Z")
+		}
+	}
+	return rule
+}
+
+func indexOf(opts []string, v string) int {
+	for i, o := range opts {
+		if o == v {
+			return i
+		}
+	}
+	return 0
 }
 
 // contactFields builds the contact form rows from c (zero value for create).
@@ -186,6 +285,16 @@ func newInput(val string) textinput.Model {
 
 func field(key, label, val string) formField {
 	return formField{key: key, label: label, kind: kindText, input: newInput(val)}
+}
+
+// choiceRow builds a cyclable fixed-option field. The selected option is stored
+// in typeIdx and cycled with ←/→ or ctrl+t; the input is an unused placeholder
+// so the focus machinery treats it like any other row.
+func choiceRow(key, label string, options []string, sel int) formField {
+	if sel < 0 || sel >= len(options) {
+		sel = 0
+	}
+	return formField{key: key, label: label, kind: kindChoice, input: newInput(""), types: options, typeIdx: sel}
 }
 
 func typedRow(group, label string, presets, existing []string, val string) formField {
@@ -244,6 +353,16 @@ func (f *createForm) update(msg tea.Msg) (submitted, cancelled bool, cmd tea.Cmd
 	case "shift+tab", "up":
 		f.focusBy(-1)
 		return false, false, nil
+	case "left":
+		if f.curIsChoice() {
+			f.cycleChoice(-1)
+			return false, false, nil
+		}
+	case "right":
+		if f.curIsChoice() {
+			f.cycleChoice(1)
+			return false, false, nil
+		}
 	case "ctrl+t":
 		f.cycleType()
 		return false, false, nil
@@ -331,6 +450,20 @@ func (f *createForm) cycleType() {
 	if len(fld.types) > 0 {
 		fld.typeIdx = (fld.typeIdx + 1) % len(fld.types)
 	}
+}
+
+// cycleChoice steps the focused choice field by d (wrapping). No-op otherwise.
+func (f *createForm) cycleChoice(d int) {
+	fld := &f.fields[f.cur().fi]
+	n := len(fld.types)
+	if fld.kind != kindChoice || n == 0 {
+		return
+	}
+	fld.typeIdx = (fld.typeIdx + d + n) % n
+}
+
+func (f *createForm) curIsChoice() bool {
+	return f.fields[f.cur().fi].kind == kindChoice
 }
 
 func (f *createForm) groupCount(g string) int {
@@ -429,6 +562,17 @@ func (f *createForm) get(key string) string {
 	return ""
 }
 
+// choice returns the selected option of the named kindChoice field, or "".
+func (f *createForm) choice(key string) string {
+	for i := range f.fields {
+		fld := &f.fields[i]
+		if fld.kind == kindChoice && fld.key == key && len(fld.types) > 0 {
+			return fld.types[fld.typeIdx]
+		}
+	}
+	return ""
+}
+
 // buildEvent parses the calendar fields into a new Event. A blank time yields an
 // all-day event; otherwise End = Start + duration minutes (default 60).
 func (f *createForm) buildEvent() (model.Event, error) {
@@ -462,10 +606,26 @@ func (f *createForm) buildEvent() (model.Event, error) {
 	ev.Location = f.get("location")
 	ev.Description = f.get("description")
 	ev.URL = f.get("url")
+	ev.RRule = f.recurrence(ev.AllDay)
 	if f.editing {
 		ev.UID, ev.Path, ev.Raw = f.origEvent.UID, f.origEvent.Path, f.origEvent.Raw
 	}
 	return ev, nil
+}
+
+// recurrence builds the event's RRULE from the picker. To avoid dropping rule
+// components the picker can't model (BYDAY, COUNT, …), an edited event whose
+// recurrence rows are left exactly as loaded keeps its original rule verbatim;
+// any change to the cadence regenerates from the picker.
+func (f *createForm) recurrence(allDay bool) string {
+	rule := composeRRule(f.choice("repeat"), f.get("interval"), f.get("until"), allDay)
+	if f.editing && f.origEvent.RRule != "" {
+		freq, interval, until, modeled := parseRRule(f.origEvent.RRule)
+		if !modeled && rule == composeRRule(freq, interval, until, allDay) {
+			return f.origEvent.RRule
+		}
+	}
+	return rule
 }
 
 // buildContact parses the contact fields into a new Contact. FN is derived from
@@ -578,7 +738,15 @@ func (f *createForm) bodyLines() (lines []string, focusLine int) {
 			marker = f.theme.StatusKey.Render("▸ ")
 			focusLine = len(lines)
 		}
-		line := marker + f.theme.Label.Render(PadRight(fld.label, labelW)) + " " + fld.input.View()
+		valView := fld.input.View()
+		if fld.kind == kindChoice {
+			opt := ""
+			if len(fld.types) > 0 {
+				opt = fld.types[fld.typeIdx]
+			}
+			valView = f.theme.Value.Render("‹ " + opt + " ›")
+		}
+		line := marker + f.theme.Label.Render(PadRight(fld.label, labelW)) + " " + valView
 		if fld.kind == kindTyped {
 			line += "  " + f.typeBadge(fld)
 		}
@@ -655,5 +823,5 @@ func (f *createForm) helpText() string {
 	if f.domain == ModeContacts {
 		return "enter save · tab next · ^t type · ^n add · ^d remove · esc cancel"
 	}
-	return "enter save · tab next · esc cancel"
+	return "enter save · tab next · ←/→ repeat · esc cancel"
 }

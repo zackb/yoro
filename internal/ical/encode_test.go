@@ -170,6 +170,77 @@ func TestBuildEventRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBuildEventRRule confirms a built recurring event serializes RRULE as a
+// RECUR value (no TEXT escaping of the ';' separators, no VALUE=TEXT param) that
+// Parse reads back verbatim.
+func TestBuildEventRRule(t *testing.T) {
+	start := time.Date(2026, 6, 20, 15, 0, 0, 0, time.Local)
+	e := model.Event{
+		UID:     "r-1",
+		Summary: "Standup",
+		Start:   start,
+		End:     start.Add(30 * time.Minute),
+		RRule:   "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+	}
+	data, err := Marshal(BuildEvent(e))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR") {
+		t.Errorf("rrule not emitted verbatim as RECUR value:\n%s", data)
+	}
+	if strings.Contains(string(data), `\;`) || strings.Contains(string(data), "VALUE=TEXT") {
+		t.Errorf("rrule was TEXT-escaped:\n%s", data)
+	}
+	f, err := Parse(data, "col")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Events) != 1 || f.Events[0].RRule != "FREQ=WEEKLY;BYDAY=MO,WE,FR" {
+		t.Errorf("rrule not round-tripped: %+v", f.Events)
+	}
+}
+
+// TestUpdateEventSetsAndClearsRRule confirms editing can add a recurrence rule
+// to a non-recurring event and clear it again (blank RRule removes the prop).
+func TestUpdateEventSetsAndClearsRRule(t *testing.T) {
+	const raw = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//other//app//EN
+BEGIN:VEVENT
+UID:edit-1
+DTSTAMP:20260601T000000Z
+DTSTART:20260616T120000Z
+DTEND:20260616T130000Z
+SUMMARY:Title
+END:VEVENT
+END:VCALENDAR
+`
+	start := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	base := model.Event{UID: "edit-1", Summary: "Title", Start: start, End: start.Add(time.Hour)}
+
+	withRule := base
+	withRule.RRule = "FREQ=DAILY"
+	cal, err := UpdateEvent([]byte(raw), withRule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := Marshal(cal)
+	if !strings.Contains(string(data), "RRULE:FREQ=DAILY") {
+		t.Errorf("rrule not added on edit:\n%s", data)
+	}
+
+	// Now clear it: feed the just-written bytes back with a blank RRule.
+	cal, err = UpdateEvent(data, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ = Marshal(cal)
+	if strings.Contains(string(data), "RRULE") {
+		t.Errorf("blank rrule not cleared:\n%s", data)
+	}
+}
+
 // TestBuildAllDayEventRoundTrip confirms a blank-time event encodes as a DATE.
 func TestBuildAllDayEventRoundTrip(t *testing.T) {
 	day := time.Date(2026, 6, 20, 0, 0, 0, 0, time.Local)

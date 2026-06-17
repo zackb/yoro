@@ -261,19 +261,15 @@ func (a *App) openCreate() {
 	}
 }
 
-// openEdit opens the form pre-filled from the selected item. Recurring events
-// are refused for now (editing the master vs a single instance is a later
-// milestone).
+// openEdit opens the form pre-filled from the selected item. Editing a
+// recurring event acts on the whole series (the master VEVENT); per-instance
+// edits are a later milestone.
 func (a *App) openEdit() {
 	switch a.mode {
 	case ModeCalendar:
 		occ, ok := a.cal.selectedOcc()
 		if !ok || occ.Event == nil {
 			a.cal.status = "no event selected"
-			return
-		}
-		if occ.Event.Recurring() {
-			a.cal.status = "editing recurring events not supported yet"
 			return
 		}
 		col := a.cal.colByID[occ.CollectionID]
@@ -293,9 +289,9 @@ func (a *App) openEdit() {
 	}
 }
 
-// openDelete opens the confirmation overlay for the selected item. Recurring
-// events are refused for now (deleting the master vs a single instance is a
-// later milestone), mirroring openEdit.
+// openDelete opens the confirmation overlay for the selected item. Deleting a
+// recurring event removes the whole series (its single object); per-instance
+// deletion is a later milestone, mirroring openEdit.
 func (a *App) openDelete() {
 	switch a.mode {
 	case ModeCalendar:
@@ -304,14 +300,14 @@ func (a *App) openDelete() {
 			a.cal.status = "no event selected"
 			return
 		}
+		message := "Delete “" + occ.Summary + "”?"
 		if occ.Event.Recurring() {
-			a.cal.status = "deleting recurring events not supported yet"
-			return
+			message = "Delete “" + occ.Summary + "” and all its occurrences?"
 		}
 		a.confirm = &confirmPrompt{
 			theme:   a.theme,
 			title:   "Delete event",
-			message: "Delete “" + occ.Summary + "”?",
+			message: message,
 			domain:  ModeCalendar,
 			colID:   occ.CollectionID,
 			path:    occ.Event.Path,

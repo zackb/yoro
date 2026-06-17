@@ -74,6 +74,7 @@ func applyEventProps(props goical.Props, e model.Event) {
 	setOrDel(props, goical.PropLocation, e.Location)
 	setOrDel(props, goical.PropDescription, e.Description)
 	setOrDel(props, goical.PropURL, e.URL)
+	setRecur(props, e.RRule)
 	if e.AllDay {
 		props.SetDate(goical.PropDateTimeStart, e.Start)
 		props.SetDate(goical.PropDateTimeEnd, e.End)
@@ -81,6 +82,21 @@ func applyEventProps(props goical.Props, e model.Event) {
 		props.SetDateTime(goical.PropDateTimeStart, e.Start.UTC())
 		props.SetDateTime(goical.PropDateTimeEnd, e.End.UTC())
 	}
+}
+
+// setRecur writes RRULE as a RECUR-typed property (value stored verbatim, not
+// TEXT-escaped) when rule is non-empty, or removes it when blank. SetText would
+// escape the ';'/',' separators and force VALUE=TEXT, both of which corrupt a
+// recurrence rule, so we set the raw value directly.
+func setRecur(props goical.Props, rule string) {
+	if rule == "" {
+		props.Del(goical.PropRecurrenceRule)
+		return
+	}
+	prop := goical.NewProp(goical.PropRecurrenceRule)
+	prop.SetValueType(goical.ValueRecurrence)
+	prop.Value = rule
+	props.Set(prop)
 }
 
 // setOrDel writes a TEXT property when val is non-empty, or removes it when

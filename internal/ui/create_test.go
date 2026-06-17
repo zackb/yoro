@@ -2,6 +2,7 @@ package ui
 
 import (
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -117,6 +118,112 @@ func TestEventFormBuildsNewFields(t *testing.T) {
 	}
 	if ev.Location != "Room 5" || ev.Description != "daily sync" || ev.URL != "https://meet.example" {
 		t.Errorf("event fields: loc=%q desc=%q url=%q", ev.Location, ev.Description, ev.URL)
+	}
+}
+
+// TestComposeRRule covers frequency, interval and until serialization for both
+// timed and all-day events.
+func TestComposeRRule(t *testing.T) {
+	cases := []struct {
+		freq, interval, until string
+		allDay                bool
+		want                  string
+	}{
+		{"None", "1", "", false, ""},
+		{"Daily", "1", "", false, "FREQ=DAILY"},
+		{"Weekly", "2", "", false, "FREQ=WEEKLY;INTERVAL=2"},
+		{"Monthly", "", "", false, "FREQ=MONTHLY"},
+		{"Daily", "1", "2026-12-31", false, "FREQ=DAILY;UNTIL=20261231T235959Z"},
+		{"Yearly", "1", "2026-12-31", true, "FREQ=YEARLY;UNTIL=20261231"},
+	}
+	for _, c := range cases {
+		if got := composeRRule(c.freq, c.interval, c.until, c.allDay); got != c.want {
+			t.Errorf("composeRRule(%q,%q,%q,allDay=%v) = %q, want %q", c.freq, c.interval, c.until, c.allDay, got, c.want)
+		}
+	}
+}
+
+// TestParseRRule covers the picker-modeled subset and the modeled flag that
+// flags rules the picker can't represent.
+func TestParseRRule(t *testing.T) {
+	cases := []struct {
+		rule                  string
+		freq, interval, until string
+		modeled               bool
+	}{
+		{"", "None", "1", "", true},
+		{"FREQ=DAILY", "Daily", "1", "", true},
+		{"FREQ=WEEKLY;INTERVAL=2", "Weekly", "2", "", true},
+		{"FREQ=MONTHLY;UNTIL=20261231T235959Z", "Monthly", "1", "2026-12-31", true},
+		{"FREQ=WEEKLY;BYDAY=MO,WE,FR", "Weekly", "1", "", false},
+		{"FREQ=DAILY;COUNT=10", "Daily", "1", "", false},
+		{"FREQ=HOURLY", "None", "1", "", false},
+	}
+	for _, c := range cases {
+		freq, interval, until, modeled := parseRRule(c.rule)
+		if freq != c.freq || interval != c.interval || until != c.until || modeled != c.modeled {
+			t.Errorf("parseRRule(%q) = (%q,%q,%q,%v), want (%q,%q,%q,%v)",
+				c.rule, freq, interval, until, modeled, c.freq, c.interval, c.until, c.modeled)
+		}
+	}
+}
+
+// TestEventFormBuildsRecurrence drives the picker and confirms buildEvent emits
+// the composed rule.
+func TestEventFormBuildsRecurrence(t *testing.T) {
+	f := newEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "")
+	setText(f, "summary", "Standup")
+	setChoice(f, "repeat", "Weekly")
+	setText(f, "interval", "2")
+	ev, err := f.buildEvent()
+	if err != nil {
+		t.Fatalf("buildEvent: %v", err)
+	}
+	if ev.RRule != "FREQ=WEEKLY;INTERVAL=2" {
+		t.Errorf("rrule: %q", ev.RRule)
+	}
+}
+
+// TestEventFormPreservesUnmodeledRule confirms editing an event with a rule the
+// picker can't represent keeps it verbatim when the cadence isn't touched, but
+// regenerates from the picker once the user changes it.
+func TestEventFormPreservesUnmodeledRule(t *testing.T) {
+	start := time.Date(2026, 6, 15, 9, 0, 0, 0, time.Local)
+	orig := model.Event{
+		UID: "e-1", Summary: "Standup", Start: start, End: start.Add(time.Hour),
+		RRule: "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+	}
+
+	// Untouched: the BYDAY rule survives verbatim.
+	f := newEditEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "", orig)
+	ev, err := f.buildEvent()
+	if err != nil {
+		t.Fatalf("buildEvent: %v", err)
+	}
+	if ev.RRule != "FREQ=WEEKLY;BYDAY=MO,WE,FR" {
+		t.Errorf("unmodeled rule not preserved: %q", ev.RRule)
+	}
+
+	// Changed cadence: regenerate from the picker (BYDAY intentionally dropped).
+	f = newEditEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "", orig)
+	setChoice(f, "repeat", "Daily")
+	ev, err = f.buildEvent()
+	if err != nil {
+		t.Fatalf("buildEvent: %v", err)
+	}
+	if ev.RRule != "FREQ=DAILY" {
+		t.Errorf("changed cadence not regenerated: %q", ev.RRule)
+	}
+}
+
+// setChoice selects the given option on a kindChoice field by key.
+func setChoice(f *createForm, key, opt string) {
+	for i := range f.fields {
+		fld := &f.fields[i]
+		if fld.kind == kindChoice && fld.key == key {
+			fld.typeIdx = indexOf(fld.types, opt)
+			return
+		}
 	}
 }
 
