@@ -2,8 +2,12 @@
 
 > A blazing-fast, terminal UI for your contacts and calendar.
 
+![calendar](docs/img/calendar.png)
+
+![contacts](docs/img/contacts.png)
 Yoro is a TUI for browsing and editing calendars and contacts from two kinds of
 **source**, treated as co-equal first-class citizens:
+
 
 - **Local vdir trees** in the standard [vdirsyncer](https://vdirsyncer.pimutils.org/)/[khal](https://lostpackets.de/khal/)
   layout — plain iCalendar (`.ics`) and vCard (`.vcf`) files on disk.
