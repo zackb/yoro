@@ -2,6 +2,7 @@ PREFIX     ?= /usr/local
 BINDIR     := $(PREFIX)/bin
 MANDIR     := $(PREFIX)/share/man/man1
 BUILDDIR   := build
+RELEASEDIR := $(BUILDDIR)/release
 BIN        := $(BUILDDIR)/yoro
 
 MODULE     := github.com/zackb/yoro
@@ -43,6 +44,18 @@ install: build
 	install -Dm755 $(BIN) $(DESTDIR)$(BINDIR)/yoro
 	install -Dm644 man/yoro.1 $(DESTDIR)$(MANDIR)/yoro.1
 	install -Dm644 LICENSE $(DESTDIR)$(PREFIX)/share/licenses/yoro/LICENSE
+
+.PHONY: package
+package: build
+	$(eval PKGVER := $(VERSION:v%=%))
+	$(eval STAGE := $(shell mktemp -d))
+	install -Dm755 $(BIN) $(STAGE)/yoro
+	install -Dm644 man/yoro.1 $(STAGE)/man/yoro.1
+	install -Dm644 LICENSE $(STAGE)/LICENSE
+	mkdir -p $(RELEASEDIR)
+	tar -czf $(RELEASEDIR)/yoro-$(PKGVER)-linux-amd64.tar.gz -C $(STAGE) .
+	rm -rf $(STAGE)
+	@echo "packaged $(RELEASEDIR)/yoro-$(PKGVER)-linux-amd64.tar.gz"
 
 .PHONY: clean
 clean:
