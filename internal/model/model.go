@@ -121,10 +121,33 @@ type Occurrence struct {
 	Event        *Event // back-reference to the base event for detail rendering
 }
 
+func dayOf(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
 // Day returns the local calendar date (midnight) of the occurrence start.
 func (o Occurrence) Day() time.Time {
-	t := o.Start
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	return dayOf(o.Start)
+}
+
+// Days returns every local calendar day the occurrence touches, from its start
+// day through its end day inclusive. An end that lands exactly on midnight (an
+// all-day DTEND, which is exclusive, or a timed event ending at 00:00) does not
+// occupy that final day.
+func (o Occurrence) Days() []time.Time {
+	start := dayOf(o.Start)
+	last := dayOf(o.End)
+	if o.End.Equal(last) && last.After(start) {
+		last = last.AddDate(0, 0, -1) // exclusive end-of-day boundary
+	}
+	if last.Before(start) {
+		last = start
+	}
+	var days []time.Time
+	for d := start; !d.After(last); d = d.AddDate(0, 0, 1) {
+		days = append(days, d)
+	}
+	return days
 }
 
 // Contact is a vCard.

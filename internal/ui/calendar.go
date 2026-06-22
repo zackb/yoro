@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,20 +109,42 @@ func (p *calendarPane) rebuild() {
 	p.rows = p.rows[:0]
 	p.selRows = p.selRows[:0]
 
-	var lastDay time.Time
+	// Bucket each occurrence under every day it spans so multi-day events appear
+	// under each day's header, not just their start day. occs is start-sorted, so
+	// appending in order keeps each day's entries ordered by start.
+	byDay := map[string][]model.Occurrence{}
+	dayOf := map[string]time.Time{}
+	winStart := dayStart(p.window.From)
+	for _, o := range occs {
+		for _, d := range o.Days() {
+			// A boundary-crossing event spans days outside the display window; skip
+			// those so they don't emit stray headers before/after the window.
+			if d.Before(winStart) || !d.Before(p.window.To) {
+				continue
+			}
+			k := d.Format("2006-01-02")
+			byDay[k] = append(byDay[k], o)
+			dayOf[k] = d
+		}
+	}
+	keys := make([]string, 0, len(byDay))
+	for k := range byDay {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	add := func(day time.Time, occ model.Occurrence, header bool) {
 		p.rows = append(p.rows, agendaRow{header: header, day: day, occ: occ})
 		if !header {
 			p.selRows = append(p.selRows, len(p.rows)-1)
 		}
 	}
-	for _, o := range occs {
-		d := o.Day()
-		if !sameDay(d, lastDay) {
-			add(d, model.Occurrence{}, true)
-			lastDay = d
+	for _, k := range keys {
+		d := dayOf[k]
+		add(d, model.Occurrence{}, true)
+		for _, o := range byDay[k] {
+			add(d, o, false)
 		}
-		add(d, o, false)
 	}
 	p.curIdx = clamp(p.curIdx, 0, max0(len(p.selRows)-1))
 }
@@ -647,8 +670,10 @@ func (p *calendarPane) occurrencesByDay(anchor time.Time) map[string][]model.Occ
 	out := map[string][]model.Occurrence{}
 	win := model.DateRange{From: startOfMonth(anchor).AddDate(0, 0, -7), To: endOfMonth(anchor).AddDate(0, 0, 7)}
 	for _, o := range p.filterOccs(p.store.Occurrences(win, p.enabled)) {
-		k := o.Day().Format("2006-01-02")
-		out[k] = append(out[k], o)
+		for _, d := range o.Days() {
+			k := d.Format("2006-01-02")
+			out[k] = append(out[k], o)
+		}
 	}
 	return out
 }
@@ -721,7 +746,9 @@ func (p *calendarPane) daysWithEvents(anchor time.Time) map[string]bool {
 	out := map[string]bool{}
 	win := model.DateRange{From: startOfMonth(anchor).AddDate(0, 0, -7), To: endOfMonth(anchor).AddDate(0, 0, 7)}
 	for _, o := range p.filterOccs(p.store.Occurrences(win, p.enabled)) {
-		out[o.Day().Format("2006-01-02")] = true
+		for _, d := range o.Days() {
+			out[d.Format("2006-01-02")] = true
+		}
 	}
 	return out
 }

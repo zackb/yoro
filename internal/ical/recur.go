@@ -14,7 +14,9 @@ import (
 // is preserved for every instance.
 func Expand(e *model.Event, from, to time.Time) []model.Occurrence {
 	if !e.Recurring() {
-		if e.Start.Before(to) && !e.Start.Before(from) {
+		// Overlap test (not start-only) so a multi-day event that begins before the
+		// window but extends into it is still returned and placed on its later days.
+		if e.Start.Before(to) && e.End.After(from) {
 			return []model.Occurrence{occurrenceAt(e, e.Start)}
 		}
 		return nil
