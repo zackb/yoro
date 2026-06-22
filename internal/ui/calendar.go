@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
@@ -57,10 +58,17 @@ type calendarPane struct {
 
 	view    calView   // agenda list vs full month grid
 	gridDay time.Time // selected day cursor in month-grid view
+
+	searching bool            // are we in search-input mode?
+	search    textinput.Model // the search text input
+	query     string          // committed/live search query
 }
 
 func newCalendarPane(theme Theme, keys KeyMap, st store.Store) *calendarPane {
 	now := time.Now()
+	ti := textinput.New()
+	ti.Prompt = IconSearch + " "
+	ti.Placeholder = "search events"
 	return &calendarPane{
 		theme:   theme,
 		keys:    keys,
@@ -69,6 +77,7 @@ func newCalendarPane(theme Theme, keys KeyMap, st store.Store) *calendarPane {
 		anchor:  startOfMonth(now),
 		window:  model.DateRange{From: dayStart(now).AddDate(0, 0, -7), To: dayStart(now).AddDate(0, 0, 56)},
 		focus:   focusMiddle,
+		search:  ti,
 	}
 }
 
@@ -95,7 +104,7 @@ func (p *calendarPane) setSize(w, h int) { p.width, p.height = w, h }
 
 // rebuild recomputes occurrences and agenda rows for the current window.
 func (p *calendarPane) rebuild() {
-	occs := p.store.Occurrences(p.window, p.enabled)
+	occs := p.filterOccs(p.store.Occurrences(p.window, p.enabled))
 	p.rows = p.rows[:0]
 	p.selRows = p.selRows[:0]
 
@@ -117,7 +126,48 @@ func (p *calendarPane) rebuild() {
 	p.curIdx = clamp(p.curIdx, 0, max0(len(p.selRows)-1))
 }
 
+// filterOccs narrows occurrences to those matching the live search query. With no
+// query it is a pass-through, so all occurrence reads (agenda, month grid,
+// mini-month) flow through it uniformly.
+func (p *calendarPane) filterOccs(occs []model.Occurrence) []model.Occurrence {
+	q := strings.ToLower(strings.TrimSpace(p.query))
+	if q == "" {
+		return occs
+	}
+	out := occs[:0:0]
+	for _, o := range occs {
+		if occContains(o, q) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// occContains reports whether an occurrence matches a lowercased query across its
+// summary, description, location, and attendees.
+func occContains(o model.Occurrence, q string) bool {
+	if strings.Contains(strings.ToLower(o.Summary), q) {
+		return true
+	}
+	if o.Event != nil {
+		if strings.Contains(strings.ToLower(o.Event.Description), q) ||
+			strings.Contains(strings.ToLower(o.Event.Location), q) {
+			return true
+		}
+		for _, a := range o.Event.Attendees {
+			if strings.Contains(strings.ToLower(a.Name), q) ||
+				strings.Contains(strings.ToLower(a.Email), q) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
+	if p.searching {
+		return p.updateSearch(msg)
+	}
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil, false
@@ -171,11 +221,50 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 	case key.Matches(km, p.keys.Tasks):
 		p.showTasks = !p.showTasks
 		p.rebuild()
+	case key.Matches(km, p.keys.Search):
+		p.startSearch()
+	case key.Matches(km, p.keys.Escape):
+		if p.query == "" {
+			return nil, false
+		}
+		p.query = ""
+		p.rebuild()
 	default:
 		return nil, false
 	}
 	p.syncAnchor()
 	return nil, true
+}
+
+func (p *calendarPane) startSearch() {
+	p.searching = true
+	p.view = viewAgenda // search always operates on the agenda list
+	p.focus = focusMiddle
+	p.search.SetValue(p.query)
+	p.search.CursorEnd()
+	p.search.Focus()
+}
+
+func (p *calendarPane) updateSearch(msg tea.Msg) (tea.Cmd, bool) {
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "enter":
+			p.query = p.search.Value()
+			p.searching = false
+			p.search.Blur()
+			p.rebuild()
+			return nil, true
+		case "esc":
+			p.searching = false
+			p.search.Blur()
+			return nil, true
+		}
+	}
+	var cmd tea.Cmd
+	p.search, cmd = p.search.Update(msg)
+	p.query = p.search.Value()
+	p.rebuild()
+	return cmd, true
 }
 
 // toggleMonthView flips between the agenda list and the month grid, carrying the
@@ -400,8 +489,12 @@ func (p *calendarPane) View() string {
 	w, h := p.width, p.height
 	sideW, agendaW, detailW := threeColumns(w, 26, 18, 34, 26, 46)
 
+	agendaTitle := "AGENDA"
+	if p.query != "" {
+		agendaTitle = fmt.Sprintf("AGENDA (%d)", len(p.selRows))
+	}
 	side := p.theme.Column("CALENDARS", p.sidebarBody(sideW-2, h-3), sideW, h, p.focus == focusLeft)
-	agenda := p.theme.Column("AGENDA", p.agendaBody(agendaW-2, h-3), agendaW, h, p.focus == focusMiddle)
+	agenda := p.theme.Column(agendaTitle, p.agendaBody(agendaW-2, h-3), agendaW, h, p.focus == focusMiddle)
 	detail := p.theme.Column("EVENT", p.detailBody(detailW-2), detailW, h, p.focus == focusRight)
 	return lipgloss.JoinHorizontal(lipgloss.Top, side, agenda, detail)
 }
@@ -553,7 +646,7 @@ func (p *calendarPane) monthDetailBody(w int) string {
 func (p *calendarPane) occurrencesByDay(anchor time.Time) map[string][]model.Occurrence {
 	out := map[string][]model.Occurrence{}
 	win := model.DateRange{From: startOfMonth(anchor).AddDate(0, 0, -7), To: endOfMonth(anchor).AddDate(0, 0, 7)}
-	for _, o := range p.store.Occurrences(win, p.enabled) {
+	for _, o := range p.filterOccs(p.store.Occurrences(win, p.enabled)) {
 		k := o.Day().Format("2006-01-02")
 		out[k] = append(out[k], o)
 	}
@@ -627,15 +720,27 @@ func (p *calendarPane) miniMonth(w int) string {
 func (p *calendarPane) daysWithEvents(anchor time.Time) map[string]bool {
 	out := map[string]bool{}
 	win := model.DateRange{From: startOfMonth(anchor).AddDate(0, 0, -7), To: endOfMonth(anchor).AddDate(0, 0, 7)}
-	for _, o := range p.store.Occurrences(win, p.enabled) {
+	for _, o := range p.filterOccs(p.store.Occurrences(win, p.enabled)) {
 		out[o.Day().Format("2006-01-02")] = true
 	}
 	return out
 }
 
 func (p *calendarPane) agendaBody(w, h int) string {
+	var b strings.Builder
+	if p.searching {
+		p.search.Width = w
+		b.WriteString(p.search.View())
+		b.WriteByte('\n')
+		h = max0(h - 1)
+	}
 	if len(p.rows) == 0 {
-		return p.theme.ItemDim.Render("no events in range")
+		msg := "no events in range"
+		if p.query != "" {
+			msg = "no matching events"
+		}
+		b.WriteString(p.theme.ItemDim.Render(msg))
+		return b.String()
 	}
 	lines := make([]string, len(p.rows))
 	for i, r := range p.rows {
@@ -650,14 +755,13 @@ func (p *calendarPane) agendaBody(w, h int) string {
 		cursorRow = p.selRows[p.curIdx]
 	}
 	visible, top := scrollWindow(lines, cursorRow, max0(h))
-	var b strings.Builder
 	for i, line := range visible {
 		rowIdx := top + i
 		isCursor := len(p.selRows) > 0 && rowIdx == p.selRows[p.curIdx]
 		if p.rows[rowIdx].header {
 			b.WriteString(line)
 		} else {
-			b.WriteString(p.theme.SelectStyle(isCursor, p.focus == focusMiddle).Render(PadRight(line, w)))
+			b.WriteString(p.theme.SelectStyle(isCursor, p.focus == focusMiddle && !p.searching).Render(PadRight(line, w)))
 		}
 		b.WriteByte('\n')
 	}

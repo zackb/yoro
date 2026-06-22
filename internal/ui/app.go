@@ -35,7 +35,7 @@ type pane interface {
 	setStatus(string)
 }
 
-func (p *calendarPane) isSearching() bool { return false }
+func (p *calendarPane) isSearching() bool { return p.searching }
 func (p *contactsPane) isSearching() bool { return p.searching }
 
 func (p *calendarPane) setStatus(s string) { p.status = s }

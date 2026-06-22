@@ -110,4 +110,57 @@ func TestInteractions(t *testing.T) {
 	press("j", "k", "y", "esc")
 	press("/", "z", "z", "z", "z", "z", "enter") // no matches
 	press("esc", "G", "g")
+
+	// Calendar: search, navigate, clear; search then toggle month grid.
+	press("1", "/", "a", "enter")
+	press("j", "k", "esc")
+	press("/", "z", "z", "z", "z", "z", "enter") // no matches
+	press("esc")
+	press("/", "a", "m", "m") // month grid honors the active filter
+	press("esc")
+}
+
+// TestCalendarSearch asserts that the calendar search narrows the agenda and that
+// clearing it restores the full list.
+func TestCalendarSearch(t *testing.T) {
+	st := store.New(localSource())
+	if err := st.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var m tea.Model = New(st)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m, _ = m.Update(storeLoadedMsg{})
+
+	key := func(k tea.KeyMsg) { m, _ = m.Update(k) }
+	runes := func(s string) {
+		for _, r := range s {
+			key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+	}
+
+	cal := m.(App).cal
+	full := len(cal.selRows)
+
+	// A query that cannot match should empty the agenda.
+	key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if !cal.searching {
+		t.Fatal("expected calendar to enter search mode after /")
+	}
+	runes("zqxjkv")
+	key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cal.searching {
+		t.Fatal("enter should commit the query and leave search mode")
+	}
+	if got := len(cal.selRows); got != 0 {
+		t.Fatalf("no-match query should empty agenda, got %d rows", got)
+	}
+
+	// Esc in normal mode clears the query and restores the full list.
+	key(tea.KeyMsg{Type: tea.KeyEscape})
+	if cal.query != "" {
+		t.Fatalf("esc should clear query, still %q", cal.query)
+	}
+	if got := len(cal.selRows); got != full {
+		t.Fatalf("clearing search should restore %d rows, got %d", full, got)
+	}
 }
