@@ -167,9 +167,9 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 - [x] Edit existing events and contacts in place (preserves unmodeled fields)
 - [x] Delete events and contacts (local file + DAV)
 - [x] Create/edit/delete recurring events (whole series, structured repeat picker)
+- [x] Full month-grid calendar view (toggle)
 - [ ] Per-instance recurring edits (`RECURRENCE-ID` / this-and-future)
 - [ ] `If-Match` conditional `PUT`s once go-webdav exposes them
-- [ ] Full month-grid calendar view (toggle)
 
 ## License
 
