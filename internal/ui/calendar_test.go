@@ -73,6 +73,39 @@ func TestMonthGridNavigation(t *testing.T) {
 	}
 }
 
+// TestPageMonthClampsDay verifies whole-month paging keeps the cursor on the same
+// day-of-month, clamped to the target month's length (Jan 31 -> Feb 28, not Mar 3),
+// and always lands the anchor on the target month.
+func TestPageMonthClampsDay(t *testing.T) {
+	day := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, time.Local)
+	}
+	wide := model.DateRange{From: day(2025, 1, 1), To: day(2027, 1, 1)}
+	cases := []struct {
+		name string
+		from time.Time
+		dir  int
+		want time.Time
+	}{
+		{"jan31 forward clamps to feb28", day(2026, 1, 31), 1, day(2026, 2, 28)},
+		{"mar31 back clamps to feb28", day(2026, 3, 31), -1, day(2026, 2, 28)},
+		{"mid-month forward keeps day", day(2026, 6, 15), 1, day(2026, 7, 15)},
+		{"dec back rolls year", day(2026, 1, 10), -1, day(2025, 12, 10)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := &calendarPane{view: viewMonth, gridDay: c.from, anchor: startOfMonth(c.from), window: wide, enabled: map[string]bool{}}
+			p.pageMonth(c.dir)
+			if !sameDay(p.gridDay, c.want) {
+				t.Errorf("gridDay = %v, want %v", p.gridDay, c.want)
+			}
+			if !p.anchor.Equal(startOfMonth(c.want)) {
+				t.Errorf("anchor = %v, want %v", p.anchor, startOfMonth(c.want))
+			}
+		})
+	}
+}
+
 // TestToggleMonthViewRoundTrip verifies the selection carries across the toggle:
 // entering the grid seeds the day from the agenda cursor; leaving it drops the
 // agenda cursor onto the first occurrence on/after that day.

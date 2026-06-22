@@ -320,8 +320,8 @@ func (p *calendarPane) cursorToDay(day time.Time) {
 }
 
 // updateMonth handles keys while the month grid is shown. The cursor is a day:
-// h/l move ±1 day, j/k move ±1 week, J/K and t jump months/today, and enter
-// drills back into the agenda list at the selected day.
+// h/l move ±1 day, j/k move ±1 week, J/K and ctrl-f/ctrl-b page ±1 month, t jumps
+// to today, and enter drills back into the agenda list at the selected day.
 func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
 	switch {
 	case km.String() == "enter":
@@ -334,10 +334,10 @@ func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
 		p.moveGrid(0, 0, -7)
 	case key.Matches(km, p.keys.Down):
 		p.moveGrid(0, 0, 7)
-	case key.Matches(km, p.keys.NextMonth):
-		p.moveGrid(0, 1, 0)
-	case key.Matches(km, p.keys.PrevMonth):
-		p.moveGrid(0, -1, 0)
+	case key.Matches(km, p.keys.NextMonth), key.Matches(km, p.keys.PageDown):
+		p.pageMonth(1)
+	case key.Matches(km, p.keys.PrevMonth), key.Matches(km, p.keys.PageUp):
+		p.pageMonth(-1)
 	case key.Matches(km, p.keys.Today):
 		p.gridDay = dayStart(time.Now())
 		p.anchor = startOfMonth(p.gridDay)
@@ -353,6 +353,20 @@ func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
 func (p *calendarPane) moveGrid(years, months, days int) {
 	p.gridDay = p.gridDay.AddDate(years, months, days)
 	p.anchor = startOfMonth(p.gridDay)
+	p.ensureWindow(p.gridDay)
+}
+
+// pageMonth pages the grid a whole month forward (dir=1) or backward (dir=-1),
+// keeping the cursor on the same day-of-month clamped to the target month's
+// length, so paging from Jan 31 lands on Feb 28 rather than overflowing to Mar 3.
+func (p *calendarPane) pageMonth(dir int) {
+	target := startOfMonth(p.anchor).AddDate(0, dir, 0)
+	day := p.gridDay.Day()
+	if last := endOfMonth(target).Day(); day > last {
+		day = last
+	}
+	p.gridDay = target.AddDate(0, 0, day-1)
+	p.anchor = target
 	p.ensureWindow(p.gridDay)
 }
 
@@ -554,9 +568,15 @@ func (p *calendarPane) monthGridBody(w, h int) string {
 			widths[i]++
 		}
 	}
-	// Body height minus the border/separator rows (top, header, header rule, 5
-	// inner rules, bottom = 9), split across 6 weeks.
-	weekH := max0((h - 9) / 6)
+	// Only render the weeks the current month actually occupies (4-6), so paging
+	// moves a full month at a time rather than a rolling 6-week window.
+	first := startOfMonth(p.anchor)
+	offset := (int(first.Weekday()) + 6) % 7 // Monday-based
+	numWeeks := (offset + endOfMonth(p.anchor).Day() + 6) / 7
+
+	// Body height minus the border/separator rows (top, header, header rule,
+	// numWeeks-1 inner rules, bottom = numWeeks+3), split across the weeks.
+	weekH := max0((h - (numWeeks + 3)) / numWeeks)
 	if weekH < 1 {
 		weekH = 1
 	}
@@ -590,10 +610,8 @@ func (p *calendarPane) monthGridBody(w, h int) string {
 	b.WriteString(joinRow(hdr) + "\n")
 	b.WriteString(hline("├", "┼", "┤") + "\n")
 
-	first := startOfMonth(p.anchor)
-	offset := (int(first.Weekday()) + 6) % 7 // Monday-based
 	day := first.AddDate(0, 0, -offset)
-	for week := 0; week < 6; week++ {
+	for week := 0; week < numWeeks; week++ {
 		cells := make([][]string, 7)
 		for d := 0; d < 7; d++ {
 			cells[d] = p.gridCell(day, today, byDay, widths[d], weekH)
@@ -606,7 +624,7 @@ func (p *calendarPane) monthGridBody(w, h int) string {
 			}
 			b.WriteString(joinRow(row) + "\n")
 		}
-		if week < 5 {
+		if week < numWeeks-1 {
 			b.WriteString(hline("├", "┼", "┤") + "\n")
 		}
 	}
@@ -615,16 +633,22 @@ func (p *calendarPane) monthGridBody(w, h int) string {
 }
 
 // gridCell renders one day as the weekH content lines of a cellW-wide block.
+// Days outside the shown month (spillover in the first/last week) render blank.
 func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.Occurrence, cellW, weekH int) []string {
-	otherMonth := day.Month() != p.anchor.Month()
+	if day.Month() != p.anchor.Month() {
+		blank := make([]string, weekH)
+		for i := range blank {
+			blank[i] = strings.Repeat(" ", cellW)
+		}
+		return blank
+	}
+
 	num := fmt.Sprintf("%2d", day.Day())
 	switch {
 	case sameDay(day, p.gridDay):
 		num = p.theme.Today.Render(num)
 	case sameDay(day, today):
 		num = p.theme.DayHeader.Render(num)
-	case otherMonth:
-		num = p.theme.ItemDim.Render(num)
 	default:
 		num = p.theme.Value.Render(num)
 	}
@@ -636,7 +660,7 @@ func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.O
 	bodyRows := weekH - 1
 	if len(occs) > 0 && bodyRows > 0 {
 		if cellW >= 8 {
-			lines = append(lines, p.cellTitles(occs, cellW, bodyRows, otherMonth)...)
+			lines = append(lines, p.cellTitles(occs, cellW, bodyRows)...)
 		} else {
 			lines = append(lines, p.cellDots(occs, cellW))
 		}
@@ -649,7 +673,7 @@ func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.O
 
 // cellTitles renders up to bodyRows event summaries, with a "+N more" final row
 // when there are more events than fit.
-func (p *calendarPane) cellTitles(occs []model.Occurrence, cellW, bodyRows int, dim bool) []string {
+func (p *calendarPane) cellTitles(occs []model.Occurrence, cellW, bodyRows int) []string {
 	out := make([]string, 0, bodyRows)
 	shown := len(occs)
 	if shown > bodyRows {
@@ -657,11 +681,7 @@ func (p *calendarPane) cellTitles(occs []model.Occurrence, cellW, bodyRows int, 
 	}
 	for i := 0; i < shown; i++ {
 		title := fmt.Sprintf("%s %s", colorDot(occs[i].Color), oneLine(occs[i].Summary))
-		style := p.theme.Value
-		if dim {
-			style = p.theme.ItemDim
-		}
-		out = append(out, style.Render(PadRight(Truncate(title, cellW), cellW)))
+		out = append(out, p.theme.Value.Render(PadRight(Truncate(title, cellW), cellW)))
 	}
 	if rest := len(occs) - shown; rest > 0 {
 		out = append(out, p.theme.ItemDim.Render(PadRight(Truncate(fmt.Sprintf("+%d more", rest), cellW), cellW)))
