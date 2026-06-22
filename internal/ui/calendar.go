@@ -536,52 +536,86 @@ func (p *calendarPane) monthView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, grid, detail)
 }
 
-// monthGridBody draws a Monday-based 6-week grid. Each day cell shows event
-// titles when the cell is wide enough, otherwise falls back to colored dots and
-// a +N overflow count.
+// monthGridBody draws a Monday-based 6-week grid with box-drawing borders around
+// every day cell. Each cell shows event titles when wide enough, otherwise falls
+// back to colored dots and a +N overflow count.
 func (p *calendarPane) monthGridBody(w, h int) string {
-	cellW := max0(w / 7)
-	if cellW < 3 {
+	// Reserve a column for the 8 vertical rules (left edge + 6 inner + right edge),
+	// then split the rest into 7 cells, handing the remainder to the leftmost cells
+	// so the grid fills the full width.
+	inner := w - 8
+	if inner/7 < 3 {
 		return p.theme.ItemDim.Render("window too narrow")
 	}
-	// Body height after the weekday header row, split across 6 weeks.
-	weekH := max0((h - 1) / 6)
-	if weekH < 2 {
-		weekH = 2
+	widths := make([]int, 7)
+	for i := range widths {
+		widths[i] = inner / 7
+		if i < inner%7 {
+			widths[i]++
+		}
+	}
+	// Body height minus the border/separator rows (top, header, header rule, 5
+	// inner rules, bottom = 9), split across 6 weeks.
+	weekH := max0((h - 9) / 6)
+	if weekH < 1 {
+		weekH = 1
 	}
 
 	today := dayStart(time.Now())
 	byDay := p.occurrencesByDay(p.anchor)
 
+	border := lipgloss.NewStyle().Foreground(p.theme.Border)
+	v := border.Render("│")
+	hline := func(l, m, r string) string {
+		parts := []string{l}
+		for i := 0; i < 7; i++ {
+			if i > 0 {
+				parts = append(parts, m)
+			}
+			parts = append(parts, strings.Repeat("─", widths[i]))
+		}
+		parts = append(parts, r)
+		return border.Render(strings.Join(parts, ""))
+	}
+	joinRow := func(cells []string) string { return v + strings.Join(cells, v) + v }
+
 	var b strings.Builder
-	b.WriteString(p.theme.Label.Render(p.weekdayHeader(cellW)) + "\n")
+	b.WriteString(hline("┌", "┬", "┐") + "\n")
+
+	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	hdr := make([]string, 7)
+	for i, n := range names {
+		hdr[i] = p.theme.Label.Render(PadRight(Truncate(n, widths[i]), widths[i]))
+	}
+	b.WriteString(joinRow(hdr) + "\n")
+	b.WriteString(hline("├", "┼", "┤") + "\n")
 
 	first := startOfMonth(p.anchor)
 	offset := (int(first.Weekday()) + 6) % 7 // Monday-based
 	day := first.AddDate(0, 0, -offset)
 	for week := 0; week < 6; week++ {
-		cells := make([]string, 7)
+		cells := make([][]string, 7)
 		for d := 0; d < 7; d++ {
-			cells[d] = p.gridCell(day, today, byDay, cellW, weekH)
+			cells[d] = p.gridCell(day, today, byDay, widths[d], weekH)
 			day = day.AddDate(0, 0, 1)
 		}
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cells...) + "\n")
+		for r := 0; r < weekH; r++ {
+			row := make([]string, 7)
+			for d := 0; d < 7; d++ {
+				row[d] = cells[d][r]
+			}
+			b.WriteString(joinRow(row) + "\n")
+		}
+		if week < 5 {
+			b.WriteString(hline("├", "┼", "┤") + "\n")
+		}
 	}
+	b.WriteString(hline("└", "┴", "┘"))
 	return b.String()
 }
 
-// weekdayHeader returns the Mon..Sun header aligned to the cell width.
-func (p *calendarPane) weekdayHeader(cellW int) string {
-	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-	cols := make([]string, 7)
-	for i, n := range names {
-		cols[i] = PadRight(Truncate(n, cellW), cellW)
-	}
-	return strings.Join(cols, "")
-}
-
-// gridCell renders one day as a cellW×weekH block.
-func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.Occurrence, cellW, weekH int) string {
+// gridCell renders one day as the weekH content lines of a cellW-wide block.
+func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.Occurrence, cellW, weekH int) []string {
 	otherMonth := day.Month() != p.anchor.Month()
 	num := fmt.Sprintf("%2d", day.Day())
 	switch {
@@ -610,7 +644,7 @@ func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.O
 	for len(lines) < weekH {
 		lines = append(lines, strings.Repeat(" ", cellW))
 	}
-	return strings.Join(lines[:weekH], "\n")
+	return lines[:weekH]
 }
 
 // cellTitles renders up to bodyRows event summaries, with a "+N more" final row
