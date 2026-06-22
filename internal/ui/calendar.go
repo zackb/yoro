@@ -21,6 +21,15 @@ type agendaRow struct {
 	occ    model.Occurrence
 }
 
+// calView selects the calendar pane's sub-view: the agenda list or the full
+// month grid.
+type calView int
+
+const (
+	viewAgenda calView = iota
+	viewMonth
+)
+
 // calendarPane is the agenda + mini-month + detail view.
 type calendarPane struct {
 	theme Theme
@@ -45,6 +54,9 @@ type calendarPane struct {
 	showTasks bool
 	focus     focusCol
 	status    string
+
+	view    calView   // agenda list vs full month grid
+	gridDay time.Time // selected day cursor in month-grid view
 }
 
 func newCalendarPane(theme Theme, keys KeyMap, st store.Store) *calendarPane {
@@ -110,6 +122,13 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
+	if key.Matches(km, p.keys.Month) {
+		p.toggleMonthView()
+		return nil, true
+	}
+	if p.view == viewMonth {
+		return p.updateMonth(km)
+	}
 	switch {
 	case key.Matches(km, p.keys.Left):
 		if p.focus > focusLeft {
@@ -157,6 +176,72 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 	p.syncAnchor()
 	return nil, true
+}
+
+// toggleMonthView flips between the agenda list and the month grid, carrying the
+// selection across: entering the grid seeds the day cursor from the selected
+// occurrence (or today); leaving it drops the agenda cursor onto that day.
+func (p *calendarPane) toggleMonthView() {
+	if p.view == viewAgenda {
+		p.gridDay = dayStart(time.Now())
+		if o, ok := p.selectedOcc(); ok {
+			p.gridDay = o.Day()
+		}
+		p.anchor = startOfMonth(p.gridDay)
+		p.view = viewMonth
+		return
+	}
+	p.view = viewAgenda
+	p.focus = focusMiddle
+	p.cursorToDay(p.gridDay)
+}
+
+// cursorToDay places the agenda cursor on the first occurrence on/after day.
+func (p *calendarPane) cursorToDay(day time.Time) {
+	for i, ri := range p.selRows {
+		if !p.rows[ri].day.Before(day) {
+			p.curIdx = i
+			return
+		}
+	}
+	p.curIdx = max0(len(p.selRows) - 1)
+}
+
+// updateMonth handles keys while the month grid is shown. The cursor is a day:
+// h/l move ±1 day, j/k move ±1 week, J/K and t jump months/today, and enter
+// drills back into the agenda list at the selected day.
+func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
+	switch {
+	case km.String() == "enter":
+		p.toggleMonthView()
+	case key.Matches(km, p.keys.Left):
+		p.moveGrid(0, 0, -1)
+	case key.Matches(km, p.keys.Right):
+		p.moveGrid(0, 0, 1)
+	case key.Matches(km, p.keys.Up):
+		p.moveGrid(0, 0, -7)
+	case key.Matches(km, p.keys.Down):
+		p.moveGrid(0, 0, 7)
+	case key.Matches(km, p.keys.NextMonth):
+		p.moveGrid(0, 1, 0)
+	case key.Matches(km, p.keys.PrevMonth):
+		p.moveGrid(0, -1, 0)
+	case key.Matches(km, p.keys.Today):
+		p.gridDay = dayStart(time.Now())
+		p.anchor = startOfMonth(p.gridDay)
+		p.ensureWindow(p.gridDay)
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+// moveGrid shifts the day cursor by the given years/months/days, keeps the shown
+// month in step, and extends the loaded window to cover the new day.
+func (p *calendarPane) moveGrid(years, months, days int) {
+	p.gridDay = p.gridDay.AddDate(years, months, days)
+	p.anchor = startOfMonth(p.gridDay)
+	p.ensureWindow(p.gridDay)
 }
 
 func (p *calendarPane) moveDown(n int) {
@@ -309,6 +394,9 @@ func (p *calendarPane) selectedOcc() (model.Occurrence, bool) {
 // ---- rendering ----
 
 func (p *calendarPane) View() string {
+	if p.view == viewMonth {
+		return p.monthView()
+	}
 	w, h := p.width, p.height
 	sideW, agendaW, detailW := threeColumns(w, 26, 18, 34, 26, 46)
 
@@ -316,6 +404,160 @@ func (p *calendarPane) View() string {
 	agenda := p.theme.Column("AGENDA", p.agendaBody(agendaW-2, h-3), agendaW, h, p.focus == focusMiddle)
 	detail := p.theme.Column("EVENT", p.detailBody(detailW-2), detailW, h, p.focus == focusRight)
 	return lipgloss.JoinHorizontal(lipgloss.Top, side, agenda, detail)
+}
+
+// monthView renders the full-width month grid alongside the detail column for the
+// selected day's events.
+func (p *calendarPane) monthView() string {
+	w, h := p.width, p.height
+	detailW := clamp(w*30/100, 26, 40)
+	gridW := max0(w - detailW)
+
+	grid := p.theme.Column(strings.ToUpper(p.anchor.Format("January 2006")),
+		p.monthGridBody(gridW-2, h-3), gridW, h, true)
+	detail := p.theme.Column(p.gridDay.Format("Mon, Jan 2"),
+		p.monthDetailBody(detailW-2), detailW, h, false)
+	return lipgloss.JoinHorizontal(lipgloss.Top, grid, detail)
+}
+
+// monthGridBody draws a Monday-based 6-week grid. Each day cell shows event
+// titles when the cell is wide enough, otherwise falls back to colored dots and
+// a +N overflow count.
+func (p *calendarPane) monthGridBody(w, h int) string {
+	cellW := max0(w / 7)
+	if cellW < 3 {
+		return p.theme.ItemDim.Render("window too narrow")
+	}
+	// Body height after the weekday header row, split across 6 weeks.
+	weekH := max0((h - 1) / 6)
+	if weekH < 2 {
+		weekH = 2
+	}
+
+	today := dayStart(time.Now())
+	byDay := p.occurrencesByDay(p.anchor)
+
+	var b strings.Builder
+	b.WriteString(p.theme.Label.Render(p.weekdayHeader(cellW)) + "\n")
+
+	first := startOfMonth(p.anchor)
+	offset := (int(first.Weekday()) + 6) % 7 // Monday-based
+	day := first.AddDate(0, 0, -offset)
+	for week := 0; week < 6; week++ {
+		cells := make([]string, 7)
+		for d := 0; d < 7; d++ {
+			cells[d] = p.gridCell(day, today, byDay, cellW, weekH)
+			day = day.AddDate(0, 0, 1)
+		}
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cells...) + "\n")
+	}
+	return b.String()
+}
+
+// weekdayHeader returns the Mon..Sun header aligned to the cell width.
+func (p *calendarPane) weekdayHeader(cellW int) string {
+	names := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	cols := make([]string, 7)
+	for i, n := range names {
+		cols[i] = PadRight(Truncate(n, cellW), cellW)
+	}
+	return strings.Join(cols, "")
+}
+
+// gridCell renders one day as a cellW×weekH block.
+func (p *calendarPane) gridCell(day, today time.Time, byDay map[string][]model.Occurrence, cellW, weekH int) string {
+	otherMonth := day.Month() != p.anchor.Month()
+	num := fmt.Sprintf("%2d", day.Day())
+	switch {
+	case sameDay(day, p.gridDay):
+		num = p.theme.Today.Render(num)
+	case sameDay(day, today):
+		num = p.theme.DayHeader.Render(num)
+	case otherMonth:
+		num = p.theme.ItemDim.Render(num)
+	default:
+		num = p.theme.Value.Render(num)
+	}
+
+	lines := make([]string, 0, weekH)
+	lines = append(lines, PadRight(num, cellW))
+
+	occs := byDay[day.Format("2006-01-02")]
+	bodyRows := weekH - 1
+	if len(occs) > 0 && bodyRows > 0 {
+		if cellW >= 8 {
+			lines = append(lines, p.cellTitles(occs, cellW, bodyRows, otherMonth)...)
+		} else {
+			lines = append(lines, p.cellDots(occs, cellW))
+		}
+	}
+	for len(lines) < weekH {
+		lines = append(lines, strings.Repeat(" ", cellW))
+	}
+	return strings.Join(lines[:weekH], "\n")
+}
+
+// cellTitles renders up to bodyRows event summaries, with a "+N more" final row
+// when there are more events than fit.
+func (p *calendarPane) cellTitles(occs []model.Occurrence, cellW, bodyRows int, dim bool) []string {
+	out := make([]string, 0, bodyRows)
+	shown := len(occs)
+	if shown > bodyRows {
+		shown = max0(bodyRows - 1) // leave a row for the overflow count
+	}
+	for i := 0; i < shown; i++ {
+		title := fmt.Sprintf("%s %s", colorDot(occs[i].Color), oneLine(occs[i].Summary))
+		style := p.theme.Value
+		if dim {
+			style = p.theme.ItemDim
+		}
+		out = append(out, style.Render(PadRight(Truncate(title, cellW), cellW)))
+	}
+	if rest := len(occs) - shown; rest > 0 {
+		out = append(out, p.theme.ItemDim.Render(PadRight(Truncate(fmt.Sprintf("+%d more", rest), cellW), cellW)))
+	}
+	return out
+}
+
+// cellDots renders a compact dots + overflow line for narrow cells.
+func (p *calendarPane) cellDots(occs []model.Occurrence, cellW int) string {
+	maxDots := max0((cellW - 1) / 2)
+	if maxDots < 1 {
+		maxDots = 1
+	}
+	parts := make([]string, 0, maxDots+1)
+	for i := 0; i < len(occs) && i < maxDots; i++ {
+		parts = append(parts, colorDot(occs[i].Color))
+	}
+	line := strings.Join(parts, " ")
+	if rest := len(occs) - maxDots; rest > 0 {
+		line += fmt.Sprintf("+%d", rest)
+	}
+	return PadRight(Truncate(line, cellW), cellW)
+}
+
+// monthDetailBody lists the selected day's events in the detail column.
+func (p *calendarPane) monthDetailBody(w int) string {
+	occs := p.occurrencesByDay(p.anchor)[p.gridDay.Format("2006-01-02")]
+	if len(occs) == 0 {
+		return p.theme.ItemDim.Render("no events")
+	}
+	var b strings.Builder
+	for _, o := range occs {
+		b.WriteString(p.theme.Value.Render(p.occRow(o, w)) + "\n")
+	}
+	return b.String()
+}
+
+// occurrencesByDay buckets the visible 6-week window's occurrences by day key.
+func (p *calendarPane) occurrencesByDay(anchor time.Time) map[string][]model.Occurrence {
+	out := map[string][]model.Occurrence{}
+	win := model.DateRange{From: startOfMonth(anchor).AddDate(0, 0, -7), To: endOfMonth(anchor).AddDate(0, 0, 7)}
+	for _, o := range p.store.Occurrences(win, p.enabled) {
+		k := o.Day().Format("2006-01-02")
+		out[k] = append(out[k], o)
+	}
+	return out
 }
 
 func (p *calendarPane) sidebarBody(w, h int) string {

@@ -108,7 +108,7 @@ func TestContactFormDeleteLastRowClears(t *testing.T) {
 // TestEventFormBuildsNewFields confirms the calendar form captures location,
 // description and URL.
 func TestEventFormBuildsNewFields(t *testing.T) {
-	f := newEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "")
+	f := newEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "", time.Time{})
 	setText(f, "summary", "Standup")
 	setText(f, "location", "Room 5")
 	setText(f, "description", "daily sync")
@@ -172,7 +172,7 @@ func TestParseRRule(t *testing.T) {
 // TestEventFormBuildsRecurrence drives the picker and confirms buildEvent emits
 // the composed rule.
 func TestEventFormBuildsRecurrence(t *testing.T) {
-	f := newEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "")
+	f := newEventForm(DefaultTheme(), model.Collection{Name: "Cal"}, "", time.Time{})
 	setText(f, "summary", "Standup")
 	setChoice(f, "repeat", "Weekly")
 	setText(f, "interval", "2")
@@ -301,7 +301,7 @@ func TestHelpTextIsContextual(t *testing.T) {
 	}
 
 	// The event recurrence picker labels the cycle hint with the field name.
-	e := newEventForm(DefaultTheme(), model.Collection{Name: "C"}, "")
+	e := newEventForm(DefaultTheme(), model.Collection{Name: "C"}, "", time.Time{})
 	for i, r := range e.refs() {
 		if e.fields[r.fi].key == "repeat" {
 			e.focus = i

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -256,7 +257,11 @@ func (a *App) openCreate() {
 			a.cal.status = "no calendar selected"
 			return
 		}
-		a.create = newEventForm(a.theme, col, a.sourceName(col.Source))
+		day := time.Time{}
+		if a.cal.view == viewMonth {
+			day = a.cal.gridDay
+		}
+		a.create = newEventForm(a.theme, col, a.sourceName(col.Source), day)
 	case ModeContacts:
 		col, ok := a.con.selectedBook()
 		if !ok {
@@ -511,6 +516,9 @@ func (a App) statusBar() string {
 	if a.mode == ModeContacts && len(a.con.sources) > 1 {
 		hintText = "s source · " + hintText
 	}
+	if a.mode == ModeCalendar {
+		hintText = "m month · " + hintText
+	}
 	hints := a.theme.StatusBar.Render(hintText)
 
 	left := calChip + " " + conChip
@@ -564,6 +572,7 @@ func (a App) helpView() string {
 		row(a.theme, "t", "jump to today"),
 		row(a.theme, "} / {", "next / previous day"),
 		row(a.theme, "J / K", "next / previous month"),
+		row(a.theme, "m", "toggle month grid (enter: open day)"),
 		row(a.theme, "space", "toggle highlighted collection"),
 		row(a.theme, "T", "toggle tasks"),
 		"",

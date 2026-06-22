@@ -33,6 +33,11 @@ func TestRenderSmoke(t *testing.T) {
 	}
 	frame("CALENDAR")
 
+	// Month grid.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	frame("CALENDAR month grid")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+
 	// Switch to contacts.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
 	frame("CONTACTS")
@@ -89,6 +94,16 @@ func TestInteractions(t *testing.T) {
 		press("k")
 	}
 	press("J", "J", "J", "K", "K", "T", "T", "?", "?")
+
+	// Month grid: toggle in, navigate by day/week/month, drill back via enter.
+	press("m")
+	press("l", "l", "h", "j", "j", "k", "J", "K", "t")
+	for i := 0; i < 40; i++ {
+		press("l")
+	}
+	press("enter")    // drills back to the agenda list at the selected day
+	press("m", "m")   // toggle in and back out
+	press("m", "esc") // esc while in grid should not panic
 
 	// Contacts: search, navigate, clear, yank.
 	press("2", "/", "b", "a", "i", "l", "enter")

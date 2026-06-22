@@ -90,12 +90,17 @@ type createForm struct {
 	origContact model.Contact
 }
 
-func newEventForm(theme Theme, target model.Collection, source string) *createForm {
-	now := time.Now()
+// newEventForm builds a blank event form. day selects the default date (its
+// time-of-day is ignored); a zero day defaults to today.
+func newEventForm(theme Theme, target model.Collection, source string, day time.Time) *createForm {
+	start := time.Now().Add(time.Hour).Truncate(time.Hour)
+	if !day.IsZero() {
+		start = time.Date(day.Year(), day.Month(), day.Day(), start.Hour(), start.Minute(), 0, 0, start.Location())
+	}
 	f := &createForm{theme: theme, domain: ModeCalendar, target: target, source: source}
 	f.fields = eventFields(model.Event{
-		Start: now.Add(time.Hour).Truncate(time.Hour),
-		End:   now.Add(2 * time.Hour).Truncate(time.Hour),
+		Start: start,
+		End:   start.Add(time.Hour),
 	})
 	f.syncFocus()
 	return f
