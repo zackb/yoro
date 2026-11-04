@@ -258,7 +258,7 @@ func (a *App) openCreate() {
 			return
 		}
 		day := time.Time{}
-		if a.cal.view == viewMonth {
+		if a.cal.view != viewAgenda {
 			day = a.cal.gridDay
 		}
 		a.create = newEventForm(a.theme, col, a.sourceName(col.Source), day)
@@ -517,7 +517,7 @@ func (a App) statusBar() string {
 		hintText = "s source · " + hintText
 	}
 	if a.mode == ModeCalendar {
-		hintText = "m month · " + hintText
+		hintText = "m month · w week · " + hintText
 	}
 	hints := a.theme.StatusBar.Render(hintText)
 
@@ -573,6 +573,7 @@ func (a App) helpView() string {
 		row(a.theme, "} / {", "next / previous day"),
 		row(a.theme, "J / K", "next / previous month"),
 		row(a.theme, "m", "toggle month grid (enter: open day)"),
+		row(a.theme, "w", "toggle week grid (enter: open day)"),
 		row(a.theme, "space", "toggle highlighted collection"),
 		row(a.theme, "T", "toggle tasks"),
 		"",

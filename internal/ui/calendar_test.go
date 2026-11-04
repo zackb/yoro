@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zackb/yoro/internal/model"
@@ -124,7 +125,7 @@ func TestToggleMonthViewRoundTrip(t *testing.T) {
 		curIdx:  1, // on the d2 occurrence
 	}
 
-	p.toggleMonthView()
+	p.toggleView(viewMonth)
 	if p.view != viewMonth {
 		t.Fatalf("expected viewMonth after toggle")
 	}
@@ -133,11 +134,75 @@ func TestToggleMonthViewRoundTrip(t *testing.T) {
 	}
 
 	p.gridDay = d1 // move the cursor back to the first day
-	p.toggleMonthView()
+	p.toggleView(viewMonth)
 	if p.view != viewAgenda {
 		t.Fatalf("expected viewAgenda after second toggle")
 	}
 	if p.curIdx != 0 {
 		t.Errorf("agenda cursor = %d, want 0 (first occ on/after %v)", p.curIdx, d1)
+	}
+}
+
+// TestWeekGrid verifies week navigation crosses week boundaries with the anchor
+// in step, and that the grid renders events within its width: a title on the
+// start hour and a continuation bar on later hours.
+func TestWeekGrid(t *testing.T) {
+	sun := time.Date(2026, 11, 8, 0, 0, 0, 0, time.Local)
+	p := &calendarPane{
+		keys:    DefaultKeyMap(),
+		view:    viewWeek,
+		gridDay: sun,
+		anchor:  startOfMonth(sun),
+		window:  model.DateRange{From: sun.AddDate(-1, 0, 0), To: sun.AddDate(1, 0, 0)},
+		enabled: map[string]bool{},
+		height:  20, // 11 visible hours, so j can scroll
+		weekTop: 8,
+	}
+	key := func(s string) { p.updateWeek(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+
+	key("l")
+	if !sameDay(p.gridDay, sun.AddDate(0, 0, 1)) || p.gridDay.Weekday() != time.Monday {
+		t.Fatalf("l from Sunday: gridDay = %v, want next Monday", p.gridDay)
+	}
+	key("J")
+	if !sameDay(p.gridDay, sun.AddDate(0, 0, 8)) {
+		t.Errorf("J: gridDay = %v, want +7 days", p.gridDay)
+	}
+	key("K")
+	key("j")
+	if p.weekTop != 9 {
+		t.Errorf("j: weekTop = %d, want 9", p.weekTop)
+	}
+
+	mon := p.gridDay
+	start := time.Date(mon.Year(), mon.Month(), mon.Day(), 10, 30, 0, 0, time.Local)
+	byDay := map[string][]model.Occurrence{
+		mon.Format("2006-01-02"): {{Summary: "Standup", Start: start, End: start.Add(2 * time.Hour)}},
+	}
+	const width = 100
+	out := p.weekGridBody(width, p.height-3, byDay)
+	lines := strings.Split(out, "\n")
+	for _, l := range lines {
+		if lipgloss.Width(l) != width {
+			t.Fatalf("row width %d, want %d: %q", lipgloss.Width(l), width, l)
+		}
+	}
+	rowFor := func(hour string) string {
+		for _, l := range lines {
+			if strings.Contains(l, hour) {
+				return l
+			}
+		}
+		t.Fatalf("no row for %s", hour)
+		return ""
+	}
+	if !strings.Contains(rowFor("10:00"), "Standup") {
+		t.Errorf("10:00 row missing title: %q", rowFor("10:00"))
+	}
+	if strings.Count(rowFor("12:00"), "│") != 10 {
+		t.Errorf("12:00 row should carry a continuation bar: %q", rowFor("12:00"))
+	}
+	if strings.Contains(rowFor("13:00"), "Standup") || strings.Count(rowFor("13:00"), "│") != 9 {
+		t.Errorf("13:00 row should be empty: %q", rowFor("13:00"))
 	}
 }

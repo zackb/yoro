@@ -139,6 +139,8 @@ Yoro uses vim motions, deviating only where a calendar has no filesystem analog.
 | `J` / `K` | Next / previous month in the mini-month      |
 | `space`   | Toggle the highlighted collection on/off     |
 | `T`       | Toggle visibility of tasks (VTODO)           |
+| `m`       | Toggle the month grid                        |
+| `w`       | Toggle the hourly week grid                  |
 
 **Contacts mode**
 
@@ -168,6 +170,7 @@ See [`man/yoro.1`](man/yoro.1) for the manual page.
 - [x] Delete events and contacts (local file + DAV)
 - [x] Create/edit/delete recurring events (whole series, structured repeat picker)
 - [x] Full month-grid calendar view (toggle)
+- [x] Hourly week-grid calendar view (toggle)
 - [ ] Per-instance recurring edits (`RECURRENCE-ID` / this-and-future)
 - [ ] `If-Match` conditional `PUT`s once go-webdav exposes them
 

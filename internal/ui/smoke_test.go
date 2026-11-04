@@ -38,6 +38,11 @@ func TestRenderSmoke(t *testing.T) {
 	frame("CALENDAR month grid")
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
 
+	// Week grid.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	frame("CALENDAR week grid")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+
 	// Switch to contacts.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
 	frame("CONTACTS")

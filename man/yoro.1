@@ -19,7 +19,7 @@ to keep a local vdir in step with a DAV server.
 The interface has two modes \(em Calendar and Contacts \(em that share the same
 navigation. The Calendar mode shows a day-grouped agenda with a mini-month
 navigator and per-collection color toggles, and can switch to a full month grid
-(\fBm\fR); recurring events are expanded on the fly. The Contacts mode shows a three-column address book / contact list / detail
+(\fBm\fR) or an hourly week grid (\fBw\fR); recurring events are expanded on the fly. The Contacts mode shows a three-column address book / contact list / detail
 view with live search.
 .PP
 Events and contacts can be created (\fBa\fR), edited (\fBe\fR), and deleted
@@ -100,6 +100,19 @@ move the day cursor left or right,
 move up or down a week,
 .B J, K
 change month,
+.B t
+jumps to today, and
+.B enter
+returns to the agenda list at the selected day.
+.TP
+.B w
+Toggle the hourly week grid view. In the grid,
+.B h, l
+move the day cursor,
+.B j, k
+scroll by an hour,
+.B J, K
+change week,
 .B t
 jumps to today, and
 .B enter

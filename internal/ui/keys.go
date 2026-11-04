@@ -41,6 +41,7 @@ type KeyMap struct {
 	Toggle    key.Binding
 	Tasks     key.Binding
 	Month     key.Binding
+	Week      key.Binding
 
 	// Contacts
 	Yank         key.Binding
@@ -82,6 +83,7 @@ func DefaultKeyMap() KeyMap {
 		Toggle:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "toggle collection")),
 		Tasks:     key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "toggle tasks")),
 		Month:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "month grid")),
+		Week:      key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "week grid")),
 
 		Yank:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yank")),
 		SwitchSource: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch source")),

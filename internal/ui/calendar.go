@@ -23,13 +23,14 @@ type agendaRow struct {
 	occ    model.Occurrence
 }
 
-// calView selects the calendar pane's sub-view: the agenda list or the full
-// month grid.
+// calView selects the calendar pane's sub-view: the agenda list, the full
+// month grid, or the hourly week grid.
 type calView int
 
 const (
 	viewAgenda calView = iota
 	viewMonth
+	viewWeek
 )
 
 // calendarPane is the agenda + mini-month + detail view.
@@ -57,8 +58,9 @@ type calendarPane struct {
 	focus     focusCol
 	status    string
 
-	view    calView   // agenda list vs full month grid
-	gridDay time.Time // selected day cursor in month-grid view
+	view    calView   // agenda list, month grid, or week grid
+	gridDay time.Time // selected day cursor in the month and week grids
+	weekTop int       // first hour shown in the week grid
 
 	searching bool            // are we in search-input mode?
 	search    textinput.Model // the search text input
@@ -196,11 +198,18 @@ func (p *calendarPane) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	if key.Matches(km, p.keys.Month) {
-		p.toggleMonthView()
+		p.toggleView(viewMonth)
 		return nil, true
 	}
-	if p.view == viewMonth {
+	if key.Matches(km, p.keys.Week) {
+		p.toggleView(viewWeek)
+		return nil, true
+	}
+	switch p.view {
+	case viewMonth:
 		return p.updateMonth(km)
+	case viewWeek:
+		return p.updateWeek(km)
 	}
 	switch {
 	case key.Matches(km, p.keys.Left):
@@ -290,22 +299,28 @@ func (p *calendarPane) updateSearch(msg tea.Msg) (tea.Cmd, bool) {
 	return cmd, true
 }
 
-// toggleMonthView flips between the agenda list and the month grid, carrying the
-// selection across: entering the grid seeds the day cursor from the selected
-// occurrence (or today); leaving it drops the agenda cursor onto that day.
-func (p *calendarPane) toggleMonthView() {
+// toggleView switches to grid view v, or back to the agenda when v is already
+// shown. Entering a grid from the agenda seeds the day cursor from the selected
+// occurrence (or today); switching between grids keeps it; leaving drops the
+// agenda cursor onto that day.
+func (p *calendarPane) toggleView(v calView) {
+	if p.view == v {
+		p.view = viewAgenda
+		p.focus = focusMiddle
+		p.cursorToDay(p.gridDay)
+		return
+	}
 	if p.view == viewAgenda {
 		p.gridDay = dayStart(time.Now())
 		if o, ok := p.selectedOcc(); ok {
 			p.gridDay = o.Day()
 		}
 		p.anchor = startOfMonth(p.gridDay)
-		p.view = viewMonth
-		return
 	}
-	p.view = viewAgenda
-	p.focus = focusMiddle
-	p.cursorToDay(p.gridDay)
+	p.view = v
+	if v == viewWeek {
+		p.weekTop = p.firstHour()
+	}
 }
 
 // cursorToDay places the agenda cursor on the first occurrence on/after day.
@@ -325,7 +340,7 @@ func (p *calendarPane) cursorToDay(day time.Time) {
 func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
 	switch {
 	case km.String() == "enter":
-		p.toggleMonthView()
+		p.toggleView(viewMonth)
 	case key.Matches(km, p.keys.Left):
 		p.moveGrid(0, 0, -1)
 	case key.Matches(km, p.keys.Right):
@@ -346,6 +361,70 @@ func (p *calendarPane) updateMonth(km tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	return nil, true
+}
+
+// updateWeek handles keys while the week grid is shown: h/l move ±1 day, j/k
+// scroll ±1 hour, ctrl-d/ctrl-u scroll half a page, J/K and ctrl-f/ctrl-b page
+// ±1 week, t jumps to today, and enter drills back into the agenda.
+func (p *calendarPane) updateWeek(km tea.KeyMsg) (tea.Cmd, bool) {
+	switch {
+	case km.String() == "enter":
+		p.toggleView(viewWeek)
+	case key.Matches(km, p.keys.Left):
+		p.moveGrid(0, 0, -1)
+	case key.Matches(km, p.keys.Right):
+		p.moveGrid(0, 0, 1)
+	case key.Matches(km, p.keys.Up):
+		p.scrollHours(-1)
+	case key.Matches(km, p.keys.Down):
+		p.scrollHours(1)
+	case key.Matches(km, p.keys.HalfUp):
+		p.scrollHours(-p.weekHours(p.height-3) / 2)
+	case key.Matches(km, p.keys.HalfDown):
+		p.scrollHours(p.weekHours(p.height-3) / 2)
+	case key.Matches(km, p.keys.NextMonth), key.Matches(km, p.keys.PageDown):
+		p.moveGrid(0, 0, 7)
+	case key.Matches(km, p.keys.PrevMonth), key.Matches(km, p.keys.PageUp):
+		p.moveGrid(0, 0, -7)
+	case key.Matches(km, p.keys.Today):
+		p.gridDay = dayStart(time.Now())
+		p.anchor = startOfMonth(p.gridDay)
+		p.ensureWindow(p.gridDay)
+		p.weekTop = p.firstHour()
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+// weekChrome is the week grid's non-hour rows: top border, header, rule,
+// all-day row, rule, bottom border.
+const weekChrome = 6
+
+// weekHours is how many hour rows fit in a week grid body of height h.
+func (p *calendarPane) weekHours(h int) int { return clamp(h-weekChrome, 1, 24) }
+
+func (p *calendarPane) scrollHours(n int) {
+	p.weekTop = clamp(p.weekTop+n, 0, 24-p.weekHours(p.height-3))
+}
+
+// firstHour is the start hour of the earliest timed event in the shown week, or
+// 08:00 when there are none.
+func (p *calendarPane) firstHour() int {
+	byDay := p.occurrencesByDay(p.anchor)
+	first := 8
+	found := false
+	for d := weekStart(p.gridDay); d.Before(weekStart(p.gridDay).AddDate(0, 0, 7)); d = d.AddDate(0, 0, 1) {
+		for _, o := range byDay[d.Format("2006-01-02")] {
+			if o.AllDay || !sameDay(o.Start, d) {
+				continue
+			}
+			if !found || o.Start.Hour() < first {
+				first, found = o.Start.Hour(), true
+			}
+		}
+	}
+	return first
 }
 
 // moveGrid shifts the day cursor by the given years/months/days, keeps the shown
@@ -520,8 +599,8 @@ func (p *calendarPane) selectedOcc() (model.Occurrence, bool) {
 // ---- rendering ----
 
 func (p *calendarPane) View() string {
-	if p.view == viewMonth {
-		return p.monthView()
+	if p.view != viewAgenda {
+		return p.gridView()
 	}
 	w, h := p.width, p.height
 	sideW, agendaW, detailW := threeColumns(w, 26, 18, 34, 26, 46)
@@ -536,15 +615,24 @@ func (p *calendarPane) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, side, agenda, detail)
 }
 
-// monthView renders the full-width month grid alongside the detail column for the
+// gridView renders the month or week grid alongside the detail column for the
 // selected day's events.
-func (p *calendarPane) monthView() string {
+func (p *calendarPane) gridView() string {
 	w, h := p.width, p.height
 	detailW := clamp(w*30/100, 26, 40)
 	gridW := max0(w - detailW)
 
-	grid := p.theme.Column(strings.ToUpper(p.anchor.Format("January 2006")),
-		p.monthGridBody(gridW-2, h-3), gridW, h, true)
+	title := strings.ToUpper(p.anchor.Format("January 2006"))
+	body := ""
+	if p.view == viewWeek {
+		start := weekStart(p.gridDay)
+		_, wk := start.ISOWeek()
+		title = fmt.Sprintf("WEEK %d · %s", wk, strings.ToUpper(start.Format("Jan 2 2006")))
+		body = p.weekGridBody(gridW-2, h-3, p.occurrencesByDay(p.anchor))
+	} else {
+		body = p.monthGridBody(gridW-2, h-3)
+	}
+	grid := p.theme.Column(title, body, gridW, h, true)
 	detail := p.theme.Column(p.gridDay.Format("Mon, Jan 2"),
 		p.monthDetailBody(detailW-2), detailW, h, false)
 	return lipgloss.JoinHorizontal(lipgloss.Top, grid, detail)
@@ -630,6 +718,153 @@ func (p *calendarPane) monthGridBody(w, h int) string {
 	}
 	b.WriteString(hline("└", "┴", "┘"))
 	return b.String()
+}
+
+// weekGridBody draws a Monday-based week as an hour gutter plus 7 day columns:
+// a header row, an all-day row, then one row per hour scrolled from weekTop.
+func (p *calendarPane) weekGridBody(w, h int, byDay map[string][]model.Occurrence) string {
+	const gutterW = 5
+	// 9 vertical rules: left edge, after the gutter, 6 between days, right edge.
+	inner := w - gutterW - 9
+	if inner/7 < 3 {
+		return p.theme.ItemDim.Render("window too narrow")
+	}
+	widths := []int{gutterW}
+	for i := 0; i < 7; i++ {
+		cw := inner / 7
+		if i < inner%7 {
+			cw++
+		}
+		widths = append(widths, cw)
+	}
+	hours := p.weekHours(h)
+	top := clamp(p.weekTop, 0, 24-hours)
+
+	border := lipgloss.NewStyle().Foreground(p.theme.Border)
+	v := border.Render("│")
+	hline := func(l, m, r string) string {
+		parts := make([]string, len(widths))
+		for i, cw := range widths {
+			parts[i] = strings.Repeat("─", cw)
+		}
+		return border.Render(l + strings.Join(parts, m) + r)
+	}
+	joinRow := func(cells []string) string { return v + strings.Join(cells, v) + v }
+
+	now := time.Now()
+	today := dayStart(now)
+	start := weekStart(p.gridDay)
+	days := make([]time.Time, 7)
+	for i := range days {
+		days[i] = start.AddDate(0, 0, i)
+	}
+
+	var b strings.Builder
+	b.WriteString(hline("┌", "┬", "┐") + "\n")
+
+	row := []string{strings.Repeat(" ", gutterW)}
+	for i, d := range days {
+		label := PadRight(Truncate(d.Format("Mon 02"), widths[i+1]), widths[i+1])
+		switch {
+		case sameDay(d, p.gridDay):
+			label = p.theme.Today.Render(label)
+		case sameDay(d, today):
+			label = p.theme.DayHeader.Render(label)
+		default:
+			label = p.theme.Label.Render(label)
+		}
+		row = append(row, label)
+	}
+	b.WriteString(joinRow(row) + "\n")
+	b.WriteString(hline("├", "┼", "┤") + "\n")
+
+	row = []string{p.theme.ItemDim.Render(PadRight("all", gutterW))}
+	for i, d := range days {
+		var allDay []model.Occurrence
+		for _, o := range byDay[d.Format("2006-01-02")] {
+			if o.AllDay {
+				allDay = append(allDay, o)
+			}
+		}
+		cell := strings.Repeat(" ", widths[i+1])
+		switch {
+		case len(allDay) == 0:
+		case widths[i+1] >= 8:
+			cell = p.cellTitles(allDay[:1], widths[i+1]-countW(len(allDay)-1), 1)[0] + p.moreCount(len(allDay)-1)
+		default:
+			cell = p.cellDots(allDay, widths[i+1])
+		}
+		row = append(row, cell)
+	}
+	b.WriteString(joinRow(row) + "\n")
+	b.WriteString(hline("├", "┼", "┤") + "\n")
+
+	for hr := top; hr < top+hours; hr++ {
+		label := PadRight(fmt.Sprintf("%02d:00", hr), gutterW)
+		if hr == now.Hour() && !today.Before(start) && today.Before(start.AddDate(0, 0, 7)) {
+			label = p.theme.Today.Render(label)
+		} else {
+			label = p.theme.ItemDim.Render(label)
+		}
+		row = []string{label}
+		for i, d := range days {
+			row = append(row, p.weekCell(d, hr, top, byDay[d.Format("2006-01-02")], widths[i+1]))
+		}
+		b.WriteString(joinRow(row) + "\n")
+	}
+	b.WriteString(hline("└", "┴", "┘"))
+	return b.String()
+}
+
+// weekCell renders the timed events overlapping one hour of a day. An event's
+// title shows on its start hour (or the top visible row if it started above);
+// later hours show a colored bar so the event reads as a block. Overlaps show
+// the first event plus a +N count.
+// ponytail: no side-by-side lanes for overlaps; add if +N proves too lossy.
+func (p *calendarPane) weekCell(day time.Time, hour, top int, occs []model.Occurrence, cellW int) string {
+	slot := time.Date(day.Year(), day.Month(), day.Day(), hour, 0, 0, 0, day.Location())
+	end := slot.Add(time.Hour)
+	var active []model.Occurrence
+	for _, o := range occs {
+		oe := o.End
+		if !oe.After(o.Start) {
+			oe = o.Start.Add(time.Minute) // zero-length events still occupy their start hour
+		}
+		if !o.AllDay && o.Start.Before(end) && oe.After(slot) {
+			active = append(active, o)
+		}
+	}
+	if len(active) == 0 {
+		return strings.Repeat(" ", cellW)
+	}
+	o := active[0]
+	for _, a := range active {
+		if !a.Start.Before(slot) { // prefer an event starting this hour
+			o = a
+			break
+		}
+	}
+	more := len(active) - 1
+	if !o.Start.Before(slot) || hour == top {
+		return p.cellTitles([]model.Occurrence{o}, cellW-countW(more), 1)[0] + p.moreCount(more)
+	}
+	bar := colorGlyph(o.Color, "│")
+	return PadRight(bar, cellW-countW(more)) + p.moreCount(more)
+}
+
+// countW is the display width of a "+N" overflow marker (0 when n is 0).
+func countW(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return len(fmt.Sprintf("+%d", n))
+}
+
+func (p *calendarPane) moreCount(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return p.theme.ItemDim.Render(fmt.Sprintf("+%d", n))
 }
 
 // gridCell renders one day as the weekH content lines of a cellW-wide block.
@@ -927,16 +1162,21 @@ func dayStart(t time.Time) time.Time {
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
 }
+func weekStart(t time.Time) time.Time {
+	return dayStart(t).AddDate(0, 0, -((int(t.Weekday()) + 6) % 7)) // Monday-based
+}
 func endOfMonth(t time.Time) time.Time { return startOfMonth(t).AddDate(0, 1, 0).AddDate(0, 0, -1) }
 func sameDay(a, b time.Time) bool {
 	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
 }
 
-func colorDot(c model.Color) string {
+func colorDot(c model.Color) string { return colorGlyph(c, IconDot) }
+
+func colorGlyph(c model.Color, glyph string) string {
 	if c.Hex() == "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89")).Render(IconDot)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89")).Render(glyph)
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(c.Hex())).Render(IconDot)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(c.Hex())).Render(glyph)
 }
 
 // rruleSummary gives a short human description of a recurrence rule.
